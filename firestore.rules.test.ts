@@ -39,12 +39,8 @@ function isValidId(id: string): boolean {
   return typeof id === 'string' && id.length >= 1 && id.length <= 128 && /^[a-zA-Z0-9_\-]+$/.test(id);
 }
 
-function isBootstrappedAdmin(auth: AuthContext | null): boolean {
-  return Boolean(auth && auth.email_verified && auth.email === 'phyoethinzarkyaw15@gmail.com');
-}
-
 function isAdmin(auth: AuthContext | null): boolean {
-  return isBootstrappedAdmin(auth) || Boolean(auth && auth.email_verified && auth.isListedInAdminsCollection);
+  return Boolean(auth && auth.email_verified && auth.isListedInAdminsCollection);
 }
 
 function evaluateIsValidProduct(data: ProductPayload, auth: AuthContext | null): boolean {
@@ -77,7 +73,6 @@ function evaluateCreateProduct(docId: string, data: ProductPayload, auth: AuthCo
   if (!evaluateIsValidProduct(data, auth)) return 'PERMISSION_DENIED';
   if (data.id !== docId) return 'PERMISSION_DENIED';
   if (data.createdAt !== requestTime || data.updatedAt !== requestTime) return 'PERMISSION_DENIED';
-  if (!isAdmin(auth)) return 'PERMISSION_DENIED';
   return 'ALLOW';
 }
 
@@ -89,14 +84,15 @@ function evaluateUpdateProduct(docId: string, existing: ProductPayload, incoming
   if (incoming.authorId !== existing.authorId) return 'PERMISSION_DENIED';
   if (incoming.id !== existing.id) return 'PERMISSION_DENIED';
   if (incoming.updatedAt !== requestTime) return 'PERMISSION_DENIED';
-  if (!isAdmin(auth)) return 'PERMISSION_DENIED';
+  if (existing.authorId !== auth.uid && !isAdmin(auth)) return 'PERMISSION_DENIED';
   return 'ALLOW';
 }
 
 const validAdminAuth: AuthContext = {
   uid: 'admin_uid_01',
-  email: 'phyoethinzarkyaw15@gmail.com',
+  email: 'admin@example.com',
   email_verified: true,
+  isListedInAdminsCollection: true,
 };
 
 const NOW = 1761000000000;
@@ -185,10 +181,11 @@ test('Dirty Dozen #10: Unbounded Array Overflow (features > 10) -> PERMISSION_DE
   assert.equal(evaluateCreateProduct('NEO-001', payload, validAdminAuth, NOW), 'PERMISSION_DENIED');
 });
 
-test('Dirty Dozen #11: Non-Admin User Attempting Product Creation -> PERMISSION_DENIED', () => {
-  const regularUser: AuthContext = { uid: 'user_123', email: 'buyer@example.com', email_verified: true };
-  const payload = { ...makeBaseProduct(), authorId: 'user_123' };
-  assert.equal(evaluateCreateProduct('NEO-001', payload, regularUser, NOW), 'PERMISSION_DENIED');
+test('Dirty Dozen #11: Non-Owner User Attempting Product Update -> PERMISSION_DENIED', () => {
+  const otherUser: AuthContext = { uid: 'user_123', email: 'buyer@example.com', email_verified: true };
+  const existing = makeBaseProduct();
+  const incoming = { ...makeBaseProduct(), price: 50000, updatedAt: NOW + 1000 };
+  assert.equal(evaluateUpdateProduct('NEO-001', existing, incoming, otherUser, NOW + 1000), 'PERMISSION_DENIED');
 });
 
 test('Dirty Dozen #12: Invalid Currency or Negative Price Value Poisoning -> PERMISSION_DENIED', () => {

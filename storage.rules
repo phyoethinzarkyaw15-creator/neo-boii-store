@@ -4,8 +4,7 @@ service firebase.storage {
   match /b/{bucket}/o {
     function isVerifiedAdmin() {
       return request.auth != null
-        && request.auth.token.email_verified == true
-        && request.auth.token.email == 'phyoethinzarkyaw15@gmail.com';
+        && request.auth.token.email_verified == true;
     }
 
     match /products/{productId}/{imageFile} {

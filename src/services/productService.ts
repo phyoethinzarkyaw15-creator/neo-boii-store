@@ -13,7 +13,6 @@ import {
 } from 'firebase/firestore';
 import {
   auth,
-  BOOTSTRAPPED_ADMIN_EMAIL,
   db,
   handleFirestoreError,
   OperationType,
@@ -125,22 +124,12 @@ function docToProduct(data: Record<string, unknown>, idFallback: string): PubgAc
 }
 
 /**
- * Checks whether the current user has verified admin privileges in Firestore.
+ * Checks whether the current user is signed in.
  */
 export async function checkIsAuthorizedFirebaseAdmin(): Promise<boolean> {
   if (!auth || !db) return false;
   const user = auth.currentUser;
-  if (!user || !user.emailVerified) return false;
-  if ((user.email || '').trim().toLowerCase() === BOOTSTRAPPED_ADMIN_EMAIL.toLowerCase()) {
-    return true;
-  }
-
-  try {
-    const adminSnap = await getDoc(doc(db, 'admins', user.uid));
-    return adminSnap.exists();
-  } catch {
-    return false;
-  }
+  return Boolean(user && user.uid);
 }
 
 /**
@@ -184,7 +173,8 @@ export function subscribeToProducts(
     // Ignore listener error
   }
 
-  let unsubscribeFirestore: () => void = () => {};
+  let unsubscribePublished: () => void = () => {};
+  let unsubscribeOwned: () => void = () => {};
 
   if (!db) {
     return () => {
@@ -199,38 +189,46 @@ export function subscribeToProducts(
 
   try {
     const user = auth?.currentUser;
-    const canListAllAsBootstrappedAdmin =
-      isAdminPage &&
-      Boolean(user?.emailVerified) &&
-      (user?.email || '').trim().toLowerCase() === BOOTSTRAPPED_ADMIN_EMAIL.toLowerCase();
-
     const productsRef = collection(db, 'products');
-    const q = canListAllAsBootstrappedAdmin
-      ? query(productsRef)
-      : query(productsRef, where('published', '==', true));
+    const publishedMap = new Map<string, PubgAccountProduct>();
+    const ownedMap = new Map<string, PubgAccountProduct>();
 
-    unsubscribeFirestore = onSnapshot(
-      q,
+    const emitMerged = () => {
+      const mergedMap = new Map<string, PubgAccountProduct>();
+      for (const [id, prod] of publishedMap.entries()) {
+        mergedMap.set(id, prod);
+      }
+      for (const [id, prod] of ownedMap.entries()) {
+        mergedMap.set(id, prod);
+      }
+      const mergedList = Array.from(mergedMap.values());
+
+      if (isAutomatedTestSession() && mergedList.length === 0) {
+        const stored = loadStoredProducts();
+        onUpdate(isAdminPage ? stored : stored.filter((p) => p.published), 'local');
+        return;
+      }
+
+      if (isAdminPage && user?.uid) {
+        saveStoredProducts(mergedList, false);
+      }
+      onUpdate(
+        isAdminPage ? mergedList : mergedList.filter((p) => p.published),
+        'firestore'
+      );
+    };
+
+    const publishedQuery = query(productsRef, where('published', '==', true));
+    unsubscribePublished = onSnapshot(
+      publishedQuery,
       (snapshot) => {
         onStoreError?.(null);
-        const firestoreProducts = snapshot.docs.map((d) =>
-          docToProduct(d.data() as Record<string, unknown>, d.id)
-        );
-
-        if (isAutomatedTestSession() && snapshot.empty) {
-          const stored = loadStoredProducts();
-          onUpdate(isAdminPage ? stored : stored.filter((p) => p.published), 'local');
-          return;
+        publishedMap.clear();
+        for (const d of snapshot.docs) {
+          const prod = docToProduct(d.data() as Record<string, unknown>, d.id);
+          publishedMap.set(prod.id, prod);
         }
-
-        // Authoritative sync from Firestore
-        if (canListAllAsBootstrappedAdmin) {
-          saveStoredProducts(firestoreProducts, false);
-        }
-        onUpdate(
-          isAdminPage ? firestoreProducts : firestoreProducts.filter((p) => p.published),
-          'firestore'
-        );
+        emitMerged();
       },
       (error) => {
         try {
@@ -241,6 +239,24 @@ export function subscribeToProducts(
         }
       }
     );
+
+    if (isAdminPage && user?.uid && user?.emailVerified) {
+      const ownedQuery = query(productsRef, where('authorId', '==', user.uid));
+      unsubscribeOwned = onSnapshot(
+        ownedQuery,
+        (snapshot) => {
+          ownedMap.clear();
+          for (const d of snapshot.docs) {
+            const prod = docToProduct(d.data() as Record<string, unknown>, d.id);
+            ownedMap.set(prod.id, prod);
+          }
+          emitMerged();
+        },
+        () => {
+          // Ignore secondary listener warning
+        }
+      );
+    }
   } catch (err) {
     console.warn('Firestore subscription fallback active:', err);
     const stored = loadStoredProducts();
@@ -255,7 +271,8 @@ export function subscribeToProducts(
       // Ignore listener removal error
     }
     try {
-      unsubscribeFirestore();
+      unsubscribePublished();
+      unsubscribeOwned();
     } catch {
       // Ignore unsubscribe error
     }
@@ -271,9 +288,7 @@ function parseReadableSaveError(err: unknown): Error {
           parsed.error.includes('Missing or insufficient permissions') ||
           parsed.error.includes('PERMISSION_DENIED')
         ) {
-          return new Error(
-            'Permission denied by Firestore. Please ensure you are signed in with your authorized administrator Google account.'
-          );
+          return new Error('Permission denied. Please sign in and try again.');
         }
         return new Error(parsed.error);
       }
@@ -282,7 +297,7 @@ function parseReadableSaveError(err: unknown): Error {
     }
     return err;
   }
-  return new Error('Unable to save product to Firestore.');
+  return new Error('Unable to save product.');
 }
 
 /**
@@ -311,9 +326,7 @@ export async function createOrSaveProduct(
   const isFirebaseAdmin = await checkIsAuthorizedFirebaseAdmin();
   if (!isFirebaseAdmin || !user) {
     if (!isAutomatedTestSession()) {
-      throw new Error(
-        'Please sign in with your authorized administrator Google account to save products to the live store.'
-      );
+      throw new Error('Please sign in to save products to the store.');
     }
   }
 
@@ -385,9 +398,7 @@ export async function updateExistingProduct(
   const isFirebaseAdmin = await checkIsAuthorizedFirebaseAdmin();
   if (!isFirebaseAdmin || !user) {
     if (!isAutomatedTestSession()) {
-      throw new Error(
-        'Please sign in with your authorized administrator Google account to update products.'
-      );
+      throw new Error('Please sign in to update products.');
     }
   }
 

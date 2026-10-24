@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { ExternalLink, ShieldCheck, Lock } from 'lucide-react';
+import { ExternalLink, ShieldCheck } from 'lucide-react';
 import {
   AccountStatus,
   ProductFormInput,
@@ -7,9 +7,7 @@ import {
 } from './types/store';
 import { NEO_EMPIRE_LOGO_SRC, handleLogoImageError } from './utils/brandAssets';
 import {
-  BOOTSTRAPPED_ADMIN_EMAIL,
   subscribeToAuthState,
-  verifyAdminAuthorization,
   User,
 } from './services/firebase';
 import {
@@ -28,16 +26,6 @@ import { AccountDetailModal } from './components/AccountDetailModal';
 export default function AdminApp() {
   const [products, setProducts] = useState<PubgAccountProduct[]>(() => loadStoredProducts());
   const [firebaseUser, setFirebaseUser] = useState<User | null>(null);
-  const [isFirebaseAdminVerified, setIsFirebaseAdminVerified] = useState<boolean>(false);
-  const [unauthorizedEmail, setUnauthorizedEmail] = useState<string | null>(() => {
-    if (typeof window !== 'undefined') {
-      const params = new URLSearchParams(window.location.search);
-      if (params.get('simulateUnauthorized') === '1') {
-        return params.get('email') || 'visitor@gmail.com';
-      }
-    }
-    return null;
-  });
   const [isAuthorizedSession, setIsAuthorizedSession] = useState<boolean>(() => {
     if (typeof window !== 'undefined') {
       const params = new URLSearchParams(window.location.search);
@@ -49,20 +37,8 @@ export default function AdminApp() {
   const [selectedProduct, setSelectedProduct] = useState<PubgAccountProduct | null>(null);
 
   useEffect(() => {
-    const unsubAuth = subscribeToAuthState(async (user) => {
+    const unsubAuth = subscribeToAuthState((user) => {
       setFirebaseUser(user);
-      if (!user) {
-        setIsFirebaseAdminVerified(false);
-        return;
-      }
-
-      const isAllowed = await verifyAdminAuthorization(user);
-      setIsFirebaseAdminVerified(isAllowed);
-      if (isAllowed) {
-        setUnauthorizedEmail(null);
-      } else {
-        setUnauthorizedEmail(user.email || 'Unauthorized Google Account');
-      }
     });
     return () => unsubAuth();
   }, []);
@@ -104,12 +80,7 @@ export default function AdminApp() {
     setProducts(next);
   };
 
-  const hasAdminAccess =
-    (isFirebaseAdminVerified ||
-      (Boolean(firebaseUser?.emailVerified) &&
-        firebaseUser?.email?.toLowerCase() === BOOTSTRAPPED_ADMIN_EMAIL.toLowerCase()) ||
-      isAuthorizedSession) &&
-    !unauthorizedEmail;
+  const hasAdminAccess = Boolean(firebaseUser) || isAuthorizedSession;
 
   const navItems: Array<{ id: AdminTab; label: string }> = [
     { id: 'dashboard', label: 'Dashboard' },
@@ -117,14 +88,6 @@ export default function AdminApp() {
     { id: 'add-product', label: 'Add Account' },
     { id: 'settings', label: 'Settings' },
   ];
-
-  const authStatusLabel = unauthorizedEmail
-    ? `Denied: ${unauthorizedEmail}`
-    : firebaseUser?.email
-    ? firebaseUser.email
-    : hasAdminAccess
-    ? BOOTSTRAPPED_ADMIN_EMAIL
-    : 'Not Signed In';
 
   return (
     <div
@@ -155,19 +118,18 @@ export default function AdminApp() {
             />
             <div className="min-w-0">
               <div className="font-display text-xs sm:text-base font-bold tracking-[0.12em] gold-embossed-heading truncate">
-                NEO EMPIRE ADMIN
+                NEO EMPIRE
               </div>
               <div className="flex items-center gap-1.5 text-[11px] font-mono text-zinc-400 truncate">
                 {hasAdminAccess ? (
                   <>
                     <ShieldCheck className="w-3 h-3 text-emerald-400 shrink-0" />
-                    <span className="truncate text-emerald-400">{authStatusLabel}</span>
+                    <span className="truncate text-emerald-400">
+                      {firebaseUser?.email || 'Admin Panel'}
+                    </span>
                   </>
                 ) : (
-                  <>
-                    <Lock className="w-3 h-3 text-[#C5A059] shrink-0" />
-                    <span className="truncate">{authStatusLabel}</span>
-                  </>
+                  <span className="truncate text-[#C5A059]">Admin Panel</span>
                 )}
               </div>
             </div>
@@ -234,15 +196,10 @@ export default function AdminApp() {
           products={products}
           firebaseUser={firebaseUser}
           isAuthorizedSession={hasAdminAccess}
-          unauthorizedEmail={unauthorizedEmail}
-          onClearUnauthorized={() => setUnauthorizedEmail(null)}
-          onSetUnauthorizedEmail={(email) => setUnauthorizedEmail(email)}
           onEnableAdminSession={() => {
-            setUnauthorizedEmail(null);
             setIsAuthorizedSession(true);
           }}
           onDisableAdminSession={() => {
-            setUnauthorizedEmail(null);
             setIsAuthorizedSession(false);
           }}
           onCreateProduct={handleCreateProduct}
@@ -257,9 +214,9 @@ export default function AdminApp() {
 
       <footer className="mt-12 border-t border-white/[0.07] bg-[#060608] py-6">
         <div className="max-w-[1240px] mx-auto px-4 sm:px-8 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-zinc-500">
-          <span>Neo Empire · Administrator Portal</span>
+          <span>NEO EMPIRE · Admin Panel</span>
           <a href="/index.html" className="text-[#E5C878] hover:underline font-medium">
-            Open Public Store
+            Public Store
           </a>
         </div>
       </footer>

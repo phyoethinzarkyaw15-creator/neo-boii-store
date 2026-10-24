@@ -12,7 +12,6 @@ import {
   AlertCircle,
   RefreshCw,
   Star,
-  ShieldAlert,
 } from 'lucide-react';
 import {
   AccountStatus,
@@ -29,11 +28,9 @@ import {
 } from '../utils/storeLogic';
 import { ImageUploadProgress, uploadAccountImage } from '../services/imageService';
 import {
-  BOOTSTRAPPED_ADMIN_EMAIL,
   formatAuthErrorMessage,
   signInAdminWithGoogle,
   signOutAdmin,
-  verifyAdminAuthorization,
   User,
 } from '../services/firebase';
 import { ProductCard3D } from './ProductCard3D';
@@ -52,9 +49,6 @@ interface AdminPanelProps {
   products: PubgAccountProduct[];
   firebaseUser: User | null;
   isAuthorizedSession: boolean;
-  unauthorizedEmail?: string | null;
-  onClearUnauthorized?: () => void;
-  onSetUnauthorizedEmail?: (email: string | null) => void;
   onEnableAdminSession: () => void;
   onDisableAdminSession: () => void;
   onCreateProduct: (input: ProductFormInput) => Promise<void>;
@@ -88,9 +82,6 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   products,
   firebaseUser,
   isAuthorizedSession,
-  unauthorizedEmail = null,
-  onClearUnauthorized,
-  onSetUnauthorizedEmail,
   onDisableAdminSession,
   onCreateProduct,
   onUpdateProduct,
@@ -127,10 +118,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   const additionalImagesInputRef = useRef<HTMLInputElement | null>(null);
   const replaceFileInputRef = useRef<HTMLInputElement | null>(null);
 
-  const isVerifiedAdminUser =
-    Boolean(firebaseUser?.emailVerified) &&
-    firebaseUser?.email?.toLowerCase() === BOOTSTRAPPED_ADMIN_EMAIL.toLowerCase();
-  const hasAdminAccess = (isVerifiedAdminUser || isAuthorizedSession) && !unauthorizedEmail;
+  const hasAdminAccess = Boolean(firebaseUser) || isAuthorizedSession;
 
   const metrics: AdminDashboardMetrics = computeDashboardMetrics(products);
 
@@ -138,17 +126,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     setAuthError(null);
     setIsSigningIn(true);
     try {
-      const user = await signInAdminWithGoogle();
-      if (!user) {
-        return;
-      }
-      const isAllowed = await verifyAdminAuthorization(user);
-      if (!isAllowed) {
-        const rejectedEmail = user.email || 'Unauthorized Google Account';
-        onSetUnauthorizedEmail?.(rejectedEmail);
-      } else {
-        onClearUnauthorized?.();
-      }
+      await signInAdminWithGoogle();
     } catch (err) {
       setAuthError(formatAuthErrorMessage(err));
     } finally {
@@ -329,20 +307,20 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
         await onUpdateProduct(editingOriginalId, candidate);
         setActionBanner({
           type: 'success',
-          message: `Account ${candidate.id} (${formatMmkPrice(candidate.price)}) saved to Firestore.`,
+          message: `Account ${candidate.id} (${formatMmkPrice(candidate.price)}) saved.`,
         });
       } else {
         await onCreateProduct(candidate);
         setActionBanner({
           type: 'success',
-          message: `Account ${candidate.id} (${formatMmkPrice(candidate.price)}) saved to Firestore and published to the Store.`,
+          message: `Account ${candidate.id} (${formatMmkPrice(candidate.price)}) saved and published to the Store.`,
         });
       }
       onSelectTab('products');
     } catch (err) {
       setActionBanner({
         type: 'error',
-        message: err instanceof Error ? err.message : 'Unable to save account to Firestore.',
+        message: err instanceof Error ? err.message : 'Unable to save account.',
       });
     } finally {
       setIsSubmitting(false);
@@ -375,112 +353,39 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     }
   };
 
-  // 1. Unauthorized Google Account Screen ("ACCESS DENIED")
-  if (unauthorizedEmail) {
-    return (
-      <section
-        data-testid="admin-access-denied"
-        className="max-w-lg mx-auto px-4 py-10 sm:py-16"
-      >
-        <div className="rounded-xl p-5 sm:p-8 neo-surface-card space-y-5 border border-red-500/35">
-          <div className="flex items-center gap-3">
-            <div className="w-11 h-11 rounded-lg bg-red-950/60 border border-red-500/40 flex items-center justify-center shrink-0">
-              <ShieldAlert className="w-5 h-5 text-red-400" />
-            </div>
-            <div className="min-w-0">
-              <div className="text-xs font-mono uppercase tracking-[0.2em] text-red-400">
-                NEO EMPIRE · SECURITY
-              </div>
-              <h1 className="font-display text-xl sm:text-2xl font-bold tracking-[0.08em] text-[#F4F2ED] mt-0.5">
-                ACCESS DENIED
-              </h1>
-            </div>
-          </div>
-
-          <div className="p-4 rounded-lg bg-red-950/35 border border-red-500/35 text-xs sm:text-sm text-red-200 space-y-1.5">
-            <div className="font-semibold text-red-300 flex items-center gap-2">
-              <AlertCircle className="w-4 h-4 shrink-0" />
-              <span>Unauthorized Google Account</span>
-            </div>
-            <p className="leading-relaxed break-words">
-              Signed in as <span className="font-mono text-white">{unauthorizedEmail}</span>. This
-              account is not authorized to access the Neo Empire Admin Panel.
-            </p>
-          </div>
-
-          <div className="space-y-3">
-            <button
-              type="button"
-              onClick={async () => {
-                await signOutAdmin();
-                onClearUnauthorized?.();
-              }}
-              className="w-full min-h-[48px] py-3 px-5 rounded-lg gold-metallic-button text-xs sm:text-sm font-bold uppercase tracking-wider flex items-center justify-center gap-2 cursor-pointer"
-            >
-              <LogOut className="w-4 h-4 shrink-0" />
-              <span>Sign Out / Switch Account</span>
-            </button>
-
-            <a
-              href="/index.html"
-              className="neo-dark-button w-full min-h-[48px] py-3 px-5 rounded-lg text-xs sm:text-sm font-semibold flex items-center justify-center gap-2 transition-colors"
-            >
-              <span>Return to Public Store</span>
-            </a>
-          </div>
-        </div>
-      </section>
-    );
-  }
-
-  // 2. Administrator Sign-In Screen (Unauthenticated — No duplicate logo image)
+  // Admin Login Screen
   if (!hasAdminAccess) {
     return (
       <section
         data-testid="admin-login-screen"
-        className="max-w-lg mx-auto px-4 py-10 sm:py-16"
+        className="max-w-md mx-auto px-4 py-12 sm:py-20"
       >
-        <div className="rounded-xl p-5 sm:p-8 neo-surface-card space-y-6">
-          <div>
-            <div className="text-xs font-mono uppercase tracking-[0.2em] text-[#C5A059]">
-              NEO EMPIRE · ADMIN AUTHENTICATION
+        <div className="rounded-xl p-6 sm:p-8 neo-surface-card space-y-6 text-center">
+          <div className="space-y-1.5">
+            <div className="text-xs font-mono uppercase tracking-[0.22em] text-[#C5A059]">
+              NEO EMPIRE
             </div>
-            <h1 className="font-display text-xl sm:text-2xl font-bold text-[#F4F2ED] mt-1">
-              Administrator Sign In
+            <h1 className="font-display text-2xl sm:text-3xl font-bold text-[#F4F2ED]">
+              Admin Panel
             </h1>
           </div>
 
-          <p className="text-sm text-zinc-300 leading-relaxed">
-            Sign in with your authorized administrator Google account (
-            <span className="font-mono text-[#E5C878]">{BOOTSTRAPPED_ADMIN_EMAIL}</span>) to manage
-            PUBG accounts, Myanmar Kyat (MMK) prices, availability status, and account images.
-          </p>
-
           {authError && (
-            <div className="p-3.5 rounded-lg bg-amber-950/40 border border-amber-500/40 text-xs text-amber-200 flex items-start gap-2.5">
+            <div className="p-3.5 rounded-lg bg-amber-950/40 border border-amber-500/40 text-xs text-amber-200 flex items-start gap-2.5 text-left">
               <AlertCircle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
               <span className="break-words">{authError}</span>
             </div>
           )}
 
-          <div className="space-y-3">
-            <button
-              type="button"
-              disabled={isSigningIn}
-              onClick={handleGoogleLogin}
-              className="w-full min-h-[48px] py-3.5 px-5 rounded-lg gold-metallic-button text-xs sm:text-sm font-bold uppercase tracking-wider flex items-center justify-center gap-2 cursor-pointer"
-            >
-              <LogIn className="w-4 h-4 shrink-0" />
-              <span>{isSigningIn ? 'Signing In...' : 'Sign In with Google'}</span>
-            </button>
-
-            <a
-              href="/index.html"
-              className="neo-dark-button w-full min-h-[46px] py-3 px-5 rounded-lg text-xs sm:text-sm font-semibold flex items-center justify-center gap-2 transition-colors"
-            >
-              <span>Return to Public Store</span>
-            </a>
-          </div>
+          <button
+            type="button"
+            disabled={isSigningIn}
+            onClick={handleGoogleLogin}
+            className="w-full min-h-[48px] py-3.5 px-5 rounded-lg gold-metallic-button text-xs sm:text-sm font-bold tracking-wider flex items-center justify-center gap-2 cursor-pointer"
+          >
+            <LogIn className="w-4 h-4 shrink-0" />
+            <span>Continue with Google</span>
+          </button>
         </div>
       </section>
     );
@@ -1029,8 +934,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                   Account Image & Additional Images ({formState.images.length}/8)
                 </div>
                 <p className="text-xs text-zinc-400 leading-relaxed">
-                  Select real account images from your Android phone (JPG, PNG, WEBP). Images are
-                  uploaded to Firebase Storage and previewed below.
+                  Select account images from your device (JPG, PNG, WEBP).
                 </p>
               </div>
 
@@ -1268,7 +1172,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
           <div>
             <h2 className="font-display text-lg font-bold text-[#F4F2ED]">Store Settings</h2>
             <p className="text-xs text-zinc-400 mt-1">
-              Storefront currency, direct purchase channel, and administrator details.
+              Storefront currency and direct purchase channel.
             </p>
           </div>
 
@@ -1291,10 +1195,6 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
               >
                 {TELEGRAM_HANDLE} ({TELEGRAM_BUY_URL})
               </a>
-            </div>
-            <div className="py-3.5 flex flex-wrap items-center justify-between gap-2">
-              <span className="text-zinc-400">Administrator Email</span>
-              <span className="font-mono text-zinc-200 break-all">{BOOTSTRAPPED_ADMIN_EMAIL}</span>
             </div>
           </div>
         </div>

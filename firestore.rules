@@ -29,12 +29,12 @@ service cloud.firestore {
       return resource.data;
     }
 
-    function isBootstrappedAdmin() {
-      return isVerifiedUser() && request.auth.token.email == 'phyoethinzarkyaw15@gmail.com';
+    function isAdmin() {
+      return isVerifiedUser() && exists(/databases/$(database)/documents/admins/$(request.auth.uid));
     }
 
-    function isAdmin() {
-      return isBootstrappedAdmin() || (isVerifiedUser() && exists(/databases/$(database)/documents/admins/$(request.auth.uid)));
+    function isProductOwnerOrAdmin() {
+      return isVerifiedUser() && (existing().authorId == request.auth.uid || isAdmin());
     }
 
     // Validation Blueprint: Product (MMK Store Schema)
@@ -101,11 +101,10 @@ service cloud.firestore {
 
     // Products Collection
     match /products/{productId} {
-      allow get: if isValidId(productId) && (existing().published == true || isAdmin());
+      allow get: if isValidId(productId) && (existing().published == true || isProductOwnerOrAdmin());
 
       // Cost-optimized list rule: zero get() or exists() calls
       allow list: if existing().published == true
-        || isBootstrappedAdmin()
         || (isSignedIn() && isVerifiedUser() && existing().authorId == request.auth.uid);
 
       allow create: if isSignedIn()
@@ -114,8 +113,7 @@ service cloud.firestore {
         && isValidProduct(incoming())
         && incoming().id == productId
         && incoming().createdAt == request.time
-        && incoming().updatedAt == request.time
-        && isAdmin();
+        && incoming().updatedAt == request.time;
 
       allow update: if isSignedIn()
         && isValidId(productId)
@@ -125,7 +123,7 @@ service cloud.firestore {
         && incoming().authorId == existing().authorId
         && incoming().id == existing().id
         && incoming().updatedAt == request.time
-        && isAdmin()
+        && isProductOwnerOrAdmin()
         && (
           // Action 1: Toggle availability status
           incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt']) ||
@@ -152,7 +150,7 @@ service cloud.firestore {
       allow delete: if isSignedIn()
         && isVerifiedUser()
         && isValidId(productId)
-        && isAdmin();
+        && isProductOwnerOrAdmin();
     }
 
     // Admins Collection
@@ -160,23 +158,22 @@ service cloud.firestore {
       allow get: if isSignedIn()
         && isVerifiedUser()
         && isValidId(adminId)
-        && (request.auth.uid == adminId || isBootstrappedAdmin());
+        && (request.auth.uid == adminId || isAdmin());
 
-      allow list: if isBootstrappedAdmin()
-        || (isSignedIn() && isVerifiedUser() && existing().uid == request.auth.uid);
+      allow list: if isSignedIn() && isVerifiedUser() && existing().uid == request.auth.uid;
 
       allow create: if isSignedIn()
         && isValidId(adminId)
         && isValidAdminRecord(incoming())
         && incoming().uid == adminId
         && incoming().createdAt == request.time
-        && isBootstrappedAdmin();
+        && isAdmin();
 
       allow update: if false;
 
       allow delete: if isSignedIn()
         && isValidId(adminId)
-        && isBootstrappedAdmin();
+        && isAdmin();
     }
   }
 }

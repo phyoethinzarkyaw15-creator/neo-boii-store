@@ -54,6 +54,6 @@ So that Google Sign-In works on `https://<project-name>.pages.dev/admin.html`:
    - Displays `NOT AVAILABLE` (`There are currently no accounts available.`) when no products are published.
    - Displays published accounts with Myanmar Kyat (`MMK`) pricing, `AVAILABLE` / `SOLD OUT` status, 3D image viewer, and the `BUY ACCOUNT` button linking to Telegram `@Littleneoo` (`https://t.me/Littleneoo`).
 2. **Admin Panel (`/admin.html`)**:
-   - Sign in as administrator (`phyoethinzarkyaw15@gmail.com`).
+   - Sign in with Google (`Continue with Google`).
    - Add, edit, or delete products, upload account images (`JPG`, `PNG`, `WEBP`), set MMK prices, toggle `AVAILABLE` / `SOLD OUT`, and toggle `Publish` / `Unpublish`.
    - All changes sync in real time with the public store via Firestore.

@@ -24,7 +24,6 @@ import { getStorage, FirebaseStorage } from 'firebase/storage';
 import firebaseConfig from '../../firebase-applet-config.json';
 
 export const PRODUCTION_PAGES_DOMAIN = 'neo-boii-store.pages.dev';
-export const BOOTSTRAPPED_ADMIN_EMAIL = 'phyoethinzarkyaw15@gmail.com';
 
 let appInstance: FirebaseApp | null = null;
 let dbInstance: Firestore | null = null;
@@ -59,7 +58,7 @@ try {
     });
   }
 } catch (err) {
-  console.error('Firebase initialization warning:', err);
+  console.error('Initialization warning:', err);
 }
 
 export const app = appInstance as FirebaseApp;
@@ -163,27 +162,21 @@ export function subscribeToAuthState(callback: (user: User | null) => void): () 
 }
 
 /**
- * Verifies whether a signed-in Firebase User is an authorized Neo Empire administrator.
- * Checks both the primary bootstrapped admin email and the Firestore `admins/{uid}` collection.
+ * Verifies whether a signed-in User is authenticated for the Admin Panel.
+ * Any valid signed-in user is permitted to access the Admin Panel.
  */
 export async function verifyAdminAuthorization(user: User | null): Promise<boolean> {
   if (!user) return false;
-
-  const normalizedEmail = (user.email || '').trim().toLowerCase();
-  if (normalizedEmail && normalizedEmail === BOOTSTRAPPED_ADMIN_EMAIL.toLowerCase()) {
-    return true;
-  }
+  if (user.uid) return true;
 
   if (!dbInstance) return false;
 
   try {
     const adminDocRef = doc(dbInstance, 'admins', user.uid);
     const adminSnap = await getDoc(adminDocRef);
-    if (!adminSnap.exists()) return false;
-    const data = adminSnap.data();
-    return data?.role === 'admin' || Boolean(data?.email);
+    return adminSnap.exists();
   } catch {
-    return false;
+    return true;
   }
 }
 
@@ -195,15 +188,11 @@ export function formatAuthErrorMessage(error: unknown): string {
       : '';
 
   if (code.includes('auth/unauthorized-domain') || rawMessage.includes('auth/unauthorized-domain')) {
-    const currentHost =
-      typeof window !== 'undefined' && window.location?.hostname
-        ? window.location.hostname
-        : PRODUCTION_PAGES_DOMAIN;
-    return `Domain "${currentHost}" is not yet authorized in Firebase Authentication. In Firebase Console → Authentication → Settings → Authorized domains, add "${PRODUCTION_PAGES_DOMAIN}" and try signing in again.`;
+    return 'This domain is not yet enabled for sign-in. Please add this domain to your authentication settings and try again.';
   }
 
   if (code.includes('auth/popup-blocked') || rawMessage.includes('auth/popup-blocked')) {
-    return 'Sign-in popup was blocked by your mobile browser. Redirecting to Google Sign-In...';
+    return 'Sign-in popup was blocked by your browser. Redirecting to sign in...';
   }
 
   if (
@@ -211,10 +200,10 @@ export function formatAuthErrorMessage(error: unknown): string {
     rawMessage.includes('auth/popup-closed-by-user') ||
     code.includes('auth/cancelled-popup-request')
   ) {
-    return 'Google Sign-In window was closed before completing sign-in. Please tap Sign In with Google again.';
+    return 'Sign-in window was closed before completing. Please try again.';
   }
 
-  return 'Google Sign-In could not complete. Please verify your connection and try again.';
+  return 'Unable to complete sign-in. Please check your connection and try again.';
 }
 
 export async function signInAdminWithGoogle(): Promise<User | null> {

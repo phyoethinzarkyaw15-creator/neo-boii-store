@@ -6,20 +6,20 @@
 2. **Product Schema Integrity**: Every create and update operation on `/products/{productId}` must pass `isValidProduct(incoming())`, enforcing exact key allowlists (`hasAll` + `hasOnly`), strict string `.size()` bounds, numeric range bounds, bounded arrays (`images` 1..8, `highlights` 1..10), and regex validation on `productId` and `authorId`.
 3. **Identity & Role Integrity**:
    - `authorId` on `/products/{productId}` must strictly match `request.auth.uid` on creation and remain immutable on updates (`incoming().authorId == existing().authorId`).
-   - Only verified administrators (`isVerifiedUser() && isAdmin()`) can create, update, or delete products.
-   - `isAdmin()` checks either the bootstrapped administrator (`request.auth.token.email == 'phyoethinzarkyaw15@gmail.com' && request.auth.token.email_verified == true`) or the existence of `/admins/$(request.auth.uid)`.
-   - Users cannot self-assign admin privileges in `/admins/{adminId}`; only the bootstrapped administrator can create or delete admin records.
+   - Only verified product owners (`existing().authorId == request.auth.uid`) or registered administrators (`isAdmin()`) can update or delete products.
+   - `isAdmin()` checks `isVerifiedUser() && exists(/databases/$(database)/documents/admins/$(request.auth.uid))`.
+   - Users cannot self-assign admin privileges in `/admins/{adminId}`.
 4. **Temporal & Immortal Field Integrity**:
    - On `create`: `incoming().createdAt == request.time && incoming().updatedAt == request.time`.
    - On `update`: `incoming().createdAt == existing().createdAt && incoming().updatedAt == request.time`.
 5. **Query Enforcer & Cost Guard**:
-   - `allow list` on `/products/{productId}` never calls `get()` or `exists()`. It enforces `resource.data.published == true || isBootstrappedAdmin() || (isSignedIn() && resource.data.authorId == request.auth.uid)`.
-   - Unpublished products (`published == false`) cannot be read or listed by unauthenticated or non-admin users.
+   - `allow list` on `/products/{productId}` never calls `get()` or `exists()`. It enforces `resource.data.published == true || (isSignedIn() && isVerifiedUser() && resource.data.authorId == request.auth.uid)`.
+   - Unpublished products (`published == false`) cannot be read or listed by unauthenticated or non-owner users.
 
 ## 2. The "Dirty Dozen" Adversarial Payloads
 
-1. **Payload 1 (Identity Spoofing)**: Authenticated admin creates `/products/NE-101` with `authorId: "spoofed_uid_999"` instead of `request.auth.uid`. -> `PERMISSION_DENIED`
-2. **Payload 2 (Unverified Email Spoofing)**: User with `email: "phyoethinzarkyaw15@gmail.com"` but `email_verified: false` attempts to create a product. -> `PERMISSION_DENIED`
+1. **Payload 1 (Identity Spoofing)**: Authenticated user creates `/products/NE-101` with `authorId: "spoofed_uid_999"` instead of `request.auth.uid`. -> `PERMISSION_DENIED`
+2. **Payload 2 (Unverified Email Spoofing)**: User with `email_verified: false` attempts to create a product. -> `PERMISSION_DENIED`
 3. **Payload 3 (Shadow Field Injection on Create)**: Admin creates `/products/NE-101` with an extra undeclared field `secretPassword: "admin123"`. -> `PERMISSION_DENIED`
 4. **Payload 4 (Shadow Field Injection on Update)**: Admin updates `/products/NE-101` adding `isFeatured: true` not in `hasOnly`. -> `PERMISSION_DENIED`
 5. **Payload 5 (Value Poisoning on Status)**: Admin updates `status` to `"PENDING_HACK"` (not in `['AVAILABLE', 'SOLD OUT']`). -> `PERMISSION_DENIED`
