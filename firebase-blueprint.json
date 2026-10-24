@@ -1,0 +1,142 @@
+{
+  "entities": {
+    "Product": {
+      "title": "Product",
+      "description": "A PUBG account product in the Neo Empire store priced in MMK.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique product identifier (e.g. NEO-001).",
+          "minLength": 2,
+          "maxLength": 64,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "name": {
+          "type": "string",
+          "description": "PUBG account title.",
+          "minLength": 2,
+          "maxLength": 120
+        },
+        "price": {
+          "type": "number",
+          "description": "Numeric price in Myanmar Kyat (MMK), e.g. 150000."
+        },
+        "currency": {
+          "type": "string",
+          "description": "Currency code (MMK).",
+          "enum": ["MMK"],
+          "minLength": 3,
+          "maxLength": 3
+        },
+        "status": {
+          "type": "string",
+          "description": "Availability state of the PUBG account.",
+          "enum": ["AVAILABLE", "SOLD OUT"],
+          "minLength": 7,
+          "maxLength": 20
+        },
+        "description": {
+          "type": "string",
+          "description": "Description of the PUBG account.",
+          "minLength": 0,
+          "maxLength": 2000
+        },
+        "features": {
+          "type": "array",
+          "description": "List of account features (0 to 10 items)."
+        },
+        "images": {
+          "type": "array",
+          "description": "List of uploaded account image URLs (0 to 8 items)."
+        },
+        "mainImage": {
+          "type": "string",
+          "description": "Primary uploaded image URL or empty string when not available.",
+          "minLength": 0,
+          "maxLength": 500000
+        },
+        "importantNotes": {
+          "type": "string",
+          "description": "Important purchase notes for customers.",
+          "minLength": 0,
+          "maxLength": 1000
+        },
+        "published": {
+          "type": "boolean",
+          "description": "Whether the product is published on the public index.html store."
+        },
+        "authorId": {
+          "type": "string",
+          "description": "UID of the administrator who created the product.",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when the product was created."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when the product was last updated."
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "price",
+        "currency",
+        "status",
+        "description",
+        "features",
+        "images",
+        "mainImage",
+        "importantNotes",
+        "published",
+        "authorId",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "AdminRecord": {
+      "title": "AdminRecord",
+      "description": "Authorized Neo Empire administrator record (non-PII).",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "description": "Administrator UID.",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "role": {
+          "type": "string",
+          "description": "Assigned role identifier.",
+          "enum": ["admin"],
+          "minLength": 5,
+          "maxLength": 16
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when the admin record was created."
+        }
+      },
+      "required": ["uid", "role", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/products/{productId}": {
+      "schema": { "$ref": "#/entities/Product" },
+      "description": "PUBG account listings read by index.html (published only) and managed by admin.html."
+    },
+    "/admins/{adminId}": {
+      "schema": { "$ref": "#/entities/AdminRecord" },
+      "description": "Trusted administrator registry used for role verification."
+    }
+  }
+}

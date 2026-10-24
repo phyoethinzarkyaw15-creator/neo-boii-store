@@ -1,0 +1,3 @@
+# Cloudflare Pages Routing Configuration for Neo Empire
+# Note: Do not rewrite /admin -> /admin.html here, as Cloudflare Pages Pretty URLs
+# natively serves /admin.html at both /admin.html and /admin without a 308 redirect loop.

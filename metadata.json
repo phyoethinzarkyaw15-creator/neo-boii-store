@@ -1,0 +1,6 @@
+{
+  "name": "Neo Empire — 3D PUBG Account Store",
+  "description": "Premium 3D esports marketplace and digital vault for verified high-tier PUBG accounts, featuring metallic gold 3D product inspection, real-time availability, and an administrative management suite.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

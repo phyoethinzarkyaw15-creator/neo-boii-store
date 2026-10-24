@@ -1,0 +1,182 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Global Safety Net: Default-deny catch-all
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Primitive Helpers
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isVerifiedUser() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isBootstrappedAdmin() {
+      return isVerifiedUser() && request.auth.token.email == 'phyoethinzarkyaw15@gmail.com';
+    }
+
+    function isAdmin() {
+      return isBootstrappedAdmin() || (isVerifiedUser() && exists(/databases/$(database)/documents/admins/$(request.auth.uid)));
+    }
+
+    // Validation Blueprint: Product (MMK Store Schema)
+    function isValidProduct(data) {
+      return data.keys().hasAll([
+          'id',
+          'name',
+          'price',
+          'currency',
+          'status',
+          'description',
+          'features',
+          'images',
+          'mainImage',
+          'importantNotes',
+          'published',
+          'authorId',
+          'createdAt',
+          'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'id',
+          'name',
+          'price',
+          'currency',
+          'status',
+          'description',
+          'features',
+          'images',
+          'mainImage',
+          'importantNotes',
+          'published',
+          'authorId',
+          'createdAt',
+          'updatedAt'
+        ])
+        && data.id is string && data.id.size() >= 2 && data.id.size() <= 64 && data.id.matches('^[a-zA-Z0-9_\\-]+$')
+        && data.name is string && data.name.size() >= 2 && data.name.size() <= 120
+        && data.price is number && data.price >= 0 && data.price <= 100000000
+        && data.currency is string && data.currency.size() == 3 && data.currency == 'MMK'
+        && data.status is string && data.status.size() >= 7 && data.status.size() <= 20 && (data.status == 'AVAILABLE' || data.status == 'SOLD OUT')
+        && data.description is string && data.description.size() <= 2000
+        && data.features is list && data.features.size() <= 10
+        && (data.features.size() == 0 || (data.features[0] is string && data.features[0].size() >= 1 && data.features[0].size() <= 120))
+        && data.images is list && data.images.size() <= 8
+        && (data.images.size() == 0 || (data.images[0] is string && data.images[0].size() >= 1 && data.images[0].size() <= 500000))
+        && data.mainImage is string && data.mainImage.size() <= 500000
+        && data.importantNotes is string && data.importantNotes.size() <= 1000
+        && data.published is bool
+        && data.authorId is string && data.authorId.size() >= 1 && data.authorId.size() <= 128 && data.authorId.matches('^[a-zA-Z0-9_\\-]+$')
+        && data.authorId == request.auth.uid
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    // Validation Blueprint: AdminRecord
+    function isValidAdminRecord(data) {
+      return data.keys().hasAll(['uid', 'role', 'createdAt'])
+        && data.keys().hasOnly(['uid', 'role', 'createdAt'])
+        && data.uid is string && data.uid.size() >= 1 && data.uid.size() <= 128 && data.uid.matches('^[a-zA-Z0-9_\\-]+$')
+        && data.role is string && data.role.size() == 5 && data.role == 'admin'
+        && data.createdAt is timestamp;
+    }
+
+    // Products Collection
+    match /products/{productId} {
+      allow get: if isValidId(productId) && (existing().published == true || isAdmin());
+
+      // Cost-optimized list rule: zero get() or exists() calls
+      allow list: if existing().published == true
+        || isBootstrappedAdmin()
+        || (isSignedIn() && isVerifiedUser() && existing().authorId == request.auth.uid);
+
+      allow create: if isSignedIn()
+        && isVerifiedUser()
+        && isValidId(productId)
+        && isValidProduct(incoming())
+        && incoming().id == productId
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time
+        && isAdmin();
+
+      allow update: if isSignedIn()
+        && isValidId(productId)
+        && isValidProduct(incoming())
+        && isVerifiedUser()
+        && incoming().createdAt == existing().createdAt
+        && incoming().authorId == existing().authorId
+        && incoming().id == existing().id
+        && incoming().updatedAt == request.time
+        && isAdmin()
+        && (
+          // Action 1: Toggle availability status
+          incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt']) ||
+          // Action 2: Update MMK price
+          incoming().diff(existing()).affectedKeys().hasOnly(['price', 'updatedAt']) ||
+          // Action 3: Toggle published state
+          incoming().diff(existing()).affectedKeys().hasOnly(['published', 'updatedAt']) ||
+          // Action 4: Full product edit
+          incoming().diff(existing()).affectedKeys().hasOnly([
+            'name',
+            'price',
+            'currency',
+            'status',
+            'description',
+            'features',
+            'images',
+            'mainImage',
+            'importantNotes',
+            'published',
+            'updatedAt'
+          ])
+        );
+
+      allow delete: if isSignedIn()
+        && isVerifiedUser()
+        && isValidId(productId)
+        && isAdmin();
+    }
+
+    // Admins Collection
+    match /admins/{adminId} {
+      allow get: if isSignedIn()
+        && isVerifiedUser()
+        && isValidId(adminId)
+        && (request.auth.uid == adminId || isBootstrappedAdmin());
+
+      allow list: if isBootstrappedAdmin()
+        || (isSignedIn() && isVerifiedUser() && existing().uid == request.auth.uid);
+
+      allow create: if isSignedIn()
+        && isValidId(adminId)
+        && isValidAdminRecord(incoming())
+        && incoming().uid == adminId
+        && incoming().createdAt == request.time
+        && isBootstrappedAdmin();
+
+      allow update: if false;
+
+      allow delete: if isSignedIn()
+        && isValidId(adminId)
+        && isBootstrappedAdmin();
+    }
+  }
+}
