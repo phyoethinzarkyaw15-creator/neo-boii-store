@@ -7,6 +7,7 @@ import {
 } from './types/store';
 import { NEO_EMPIRE_LOGO_SRC, handleLogoImageError } from './utils/brandAssets';
 import {
+  completeRedirectSignIn,
   subscribeToAuthState,
   User,
 } from './services/firebase';
@@ -26,6 +27,7 @@ import { AccountDetailModal } from './components/AccountDetailModal';
 export default function AdminApp() {
   const [products, setProducts] = useState<PubgAccountProduct[]>(() => loadStoredProducts());
   const [firebaseUser, setFirebaseUser] = useState<User | null>(null);
+  const [redirectAuthError, setRedirectAuthError] = useState<string | null>(null);
   const [isAuthorizedSession, setIsAuthorizedSession] = useState<boolean>(() => {
     if (typeof window !== 'undefined') {
       const params = new URLSearchParams(window.location.search);
@@ -37,10 +39,29 @@ export default function AdminApp() {
   const [selectedProduct, setSelectedProduct] = useState<PubgAccountProduct | null>(null);
 
   useEffect(() => {
+    let isMounted = true;
     const unsubAuth = subscribeToAuthState((user) => {
+      if (!isMounted) return;
       setFirebaseUser(user);
+      if (user) {
+        setRedirectAuthError(null);
+      }
     });
-    return () => unsubAuth();
+
+    completeRedirectSignIn().then(({ user, error }) => {
+      if (!isMounted) return;
+      if (user) {
+        setFirebaseUser(user);
+        setRedirectAuthError(null);
+      } else if (error) {
+        setRedirectAuthError(error);
+      }
+    });
+
+    return () => {
+      isMounted = false;
+      unsubAuth();
+    };
   }, []);
 
   useEffect(() => {
@@ -195,6 +216,7 @@ export default function AdminApp() {
           onSelectTab={setActiveTab}
           products={products}
           firebaseUser={firebaseUser}
+          initialAuthError={redirectAuthError}
           isAuthorizedSession={hasAdminAccess}
           onEnableAdminSession={() => {
             setIsAuthorizedSession(true);

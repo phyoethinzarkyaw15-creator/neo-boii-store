@@ -2,7 +2,6 @@ import { initializeApp, FirebaseApp } from 'firebase/app';
 import {
   getAuth,
   GoogleAuthProvider,
-  signInWithPopup,
   signInWithRedirect,
   getRedirectResult,
   signOut as firebaseSignOut,
@@ -30,6 +29,8 @@ let dbInstance: Firestore | null = null;
 let authInstance: Auth | null = null;
 let storageInstance: FirebaseStorage | null = null;
 let googleProviderInstance: GoogleAuthProvider | null = null;
+let persistenceReadyPromise: Promise<void> = Promise.resolve();
+let redirectResultPromise: Promise<{ user: User | null; error: string | null }> | null = null;
 
 try {
   appInstance = initializeApp(firebaseConfig);
@@ -44,17 +45,13 @@ try {
   googleProviderInstance.setCustomParameters({ prompt: 'select_account' });
 
   if (typeof window !== 'undefined' && authInstance) {
-    setPersistence(authInstance, browserLocalPersistence).catch(() => {
-      if (authInstance) {
-        setPersistence(authInstance, inMemoryPersistence).catch(() => {
-          // Ignore persistence errors on restricted mobile browsers
-        });
+    const activeAuth = authInstance;
+    persistenceReadyPromise = setPersistence(activeAuth, browserLocalPersistence).catch(async () => {
+      try {
+        await setPersistence(activeAuth, inMemoryPersistence);
+      } catch {
+        // Ignore persistence fallback errors on restricted mobile browsers
       }
-    });
-
-    // Process any pending mobile redirect sign-in result cleanly
-    getRedirectResult(authInstance).catch(() => {
-      // Ignore redirect check warnings when no redirect is pending
     });
   }
 } catch (err) {
@@ -188,42 +185,57 @@ export function formatAuthErrorMessage(error: unknown): string {
       : '';
 
   if (code.includes('auth/unauthorized-domain') || rawMessage.includes('auth/unauthorized-domain')) {
-    return 'This domain is not yet enabled for sign-in. Please add this domain to your authentication settings and try again.';
-  }
-
-  if (code.includes('auth/popup-blocked') || rawMessage.includes('auth/popup-blocked')) {
-    return 'Sign-in popup was blocked by your browser. Redirecting to sign in...';
+    return 'Google sign-in is not enabled for this website domain.';
   }
 
   if (
     code.includes('auth/popup-closed-by-user') ||
     rawMessage.includes('auth/popup-closed-by-user') ||
-    code.includes('auth/cancelled-popup-request')
+    code.includes('auth/cancelled-popup-request') ||
+    rawMessage.includes('auth/cancelled-popup-request') ||
+    code.includes('auth/redirect-cancelled-by-user') ||
+    rawMessage.includes('auth/redirect-cancelled-by-user') ||
+    code.includes('auth/operation-not-allowed') ||
+    rawMessage.includes('auth/operation-not-allowed') ||
+    code.includes('auth/network-request-failed') ||
+    rawMessage.includes('auth/network-request-failed')
   ) {
-    return 'Sign-in window was closed before completing. Please try again.';
+    return 'Google sign-in could not be completed. Please try again.';
   }
 
-  return 'Unable to complete sign-in. Please check your connection and try again.';
+  return 'Google sign-in could not be completed. Please try again.';
+}
+
+export function completeRedirectSignIn(): Promise<{ user: User | null; error: string | null }> {
+  if (typeof window === 'undefined' || !authInstance) {
+    return Promise.resolve({ user: null, error: null });
+  }
+  if (!redirectResultPromise) {
+    const activeAuth = authInstance;
+    redirectResultPromise = persistenceReadyPromise
+      .then(() => getRedirectResult(activeAuth))
+      .then((result) => ({
+        user: result?.user ?? activeAuth.currentUser ?? null,
+        error: null,
+      }))
+      .catch((error) => ({
+        user: activeAuth.currentUser ?? null,
+        error: formatAuthErrorMessage(error),
+      }));
+  }
+  return redirectResultPromise;
 }
 
 export async function signInAdminWithGoogle(): Promise<User | null> {
   if (!authInstance || !googleProviderInstance) {
-    throw new Error('Authentication service is currently unavailable.');
+    throw new Error('Google sign-in could not be completed. Please try again.');
   }
-  try {
-    const result = await signInWithPopup(authInstance, googleProviderInstance);
-    return result.user;
-  } catch (error) {
-    const code =
-      typeof error === 'object' && error !== null && 'code' in error
-        ? String((error as { code?: unknown }).code)
-        : '';
-    if (code.includes('auth/popup-blocked')) {
-      await signInWithRedirect(authInstance, googleProviderInstance);
-      return null;
-    }
-    throw error;
+  if (authInstance.currentUser) {
+    return authInstance.currentUser;
   }
+  await persistenceReadyPromise;
+  await signInWithRedirect(authInstance, googleProviderInstance);
+  return null;
 }
 
 export async function signOutAdmin(): Promise<void> {
@@ -235,5 +247,5 @@ export async function signOutAdmin(): Promise<void> {
   }
 }
 
-export { onAuthStateChanged };
+export { onAuthStateChanged, signInWithRedirect, getRedirectResult };
 export type { User };

@@ -48,6 +48,7 @@ interface AdminPanelProps {
   onSelectTab: (tab: AdminTab) => void;
   products: PubgAccountProduct[];
   firebaseUser: User | null;
+  initialAuthError?: string | null;
   isAuthorizedSession: boolean;
   onEnableAdminSession: () => void;
   onDisableAdminSession: () => void;
@@ -81,6 +82,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   onSelectTab,
   products,
   firebaseUser,
+  initialAuthError = null,
   isAuthorizedSession,
   onDisableAdminSession,
   onCreateProduct,
@@ -119,17 +121,18 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   const replaceFileInputRef = useRef<HTMLInputElement | null>(null);
 
   const hasAdminAccess = Boolean(firebaseUser) || isAuthorizedSession;
+  const displayedAuthError = authError || initialAuthError;
 
   const metrics: AdminDashboardMetrics = computeDashboardMetrics(products);
 
   const handleGoogleLogin = async () => {
+    if (firebaseUser) return;
     setAuthError(null);
     setIsSigningIn(true);
     try {
       await signInAdminWithGoogle();
     } catch (err) {
       setAuthError(formatAuthErrorMessage(err));
-    } finally {
       setIsSigningIn(false);
     }
   };
@@ -370,10 +373,10 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
             </h1>
           </div>
 
-          {authError && (
+          {displayedAuthError && (
             <div className="p-3.5 rounded-lg bg-amber-950/40 border border-amber-500/40 text-xs text-amber-200 flex items-start gap-2.5 text-left">
               <AlertCircle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
-              <span className="break-words">{authError}</span>
+              <span className="break-words">{displayedAuthError}</span>
             </div>
           )}
 

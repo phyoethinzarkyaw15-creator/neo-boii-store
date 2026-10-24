@@ -8,6 +8,7 @@ import {
   validateProductInput,
 } from './storeLogic';
 import { AccountStatus, PubgAccountProduct } from '../types/store';
+import { formatAuthErrorMessage } from '../services/firebase';
 
 const testRecords: PubgAccountProduct[] = [
   {
@@ -154,4 +155,23 @@ test('validateImageFileMeta enforces MIME type and 8MB size limit', () => {
   assert.equal(validateImageFileMeta('account.jpg', 'image/jpeg', 500_000).valid, true);
   assert.equal(validateImageFileMeta('script.exe', 'application/x-msdownload', 1024).valid, false);
   assert.equal(validateImageFileMeta('huge.png', 'image/png', 10 * 1024 * 1024).valid, false);
+});
+
+test('formatAuthErrorMessage maps Firebase error codes to clean user-facing messages', () => {
+  assert.equal(
+    formatAuthErrorMessage({ code: 'auth/unauthorized-domain' }),
+    'Google sign-in is not enabled for this website domain.'
+  );
+  for (const code of [
+    'auth/popup-closed-by-user',
+    'auth/cancelled-popup-request',
+    'auth/redirect-cancelled-by-user',
+    'auth/operation-not-allowed',
+    'auth/network-request-failed',
+  ]) {
+    assert.equal(
+      formatAuthErrorMessage({ code }),
+      'Google sign-in could not be completed. Please try again.'
+    );
+  }
 });
