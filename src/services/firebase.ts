@@ -8,7 +8,6 @@ import {
   onAuthStateChanged,
   setPersistence,
   browserLocalPersistence,
-  inMemoryPersistence,
   Auth,
   User,
 } from 'firebase/auth';
@@ -29,7 +28,6 @@ let dbInstance: Firestore | null = null;
 let authInstance: Auth | null = null;
 let storageInstance: FirebaseStorage | null = null;
 let googleProviderInstance: GoogleAuthProvider | null = null;
-let persistenceReadyPromise: Promise<void> = Promise.resolve();
 let redirectResultPromise: Promise<{ user: User | null; error: string | null }> | null = null;
 
 try {
@@ -43,17 +41,6 @@ try {
   }
   googleProviderInstance = new GoogleAuthProvider();
   googleProviderInstance.setCustomParameters({ prompt: 'select_account' });
-
-  if (typeof window !== 'undefined' && authInstance) {
-    const activeAuth = authInstance;
-    persistenceReadyPromise = setPersistence(activeAuth, browserLocalPersistence).catch(async () => {
-      try {
-        await setPersistence(activeAuth, inMemoryPersistence);
-      } catch {
-        // Ignore persistence fallback errors on restricted mobile browsers
-      }
-    });
-  }
 } catch (err) {
   console.error('Initialization warning:', err);
 }
@@ -63,6 +50,7 @@ export const db = dbInstance as Firestore;
 export const auth = authInstance as Auth;
 export const storage = storageInstance as FirebaseStorage;
 export const googleProvider = googleProviderInstance as GoogleAuthProvider;
+export const provider = googleProviderInstance as GoogleAuthProvider;
 
 export function isFirebaseReady(): boolean {
   return Boolean(appInstance && dbInstance);
@@ -109,9 +97,9 @@ export function handleFirestoreError(
       isAnonymous: currentUser?.isAnonymous,
       tenantId: currentUser?.tenantId,
       providerInfo:
-        currentUser?.providerData?.map((provider) => ({
-          providerId: provider.providerId,
-          email: provider.email,
+        currentUser?.providerData?.map((p) => ({
+          providerId: p.providerId,
+          email: p.email,
         })) || [],
     },
     operationType,
@@ -149,18 +137,18 @@ export function subscribeToAuthState(callback: (user: User | null) => void): () 
       (user) => callback(user),
       (err) => {
         console.warn('Auth state listener warning:', err);
-        callback(null);
+        callback(authInstance?.currentUser ?? null);
       }
     );
   } catch {
-    callback(null);
+    callback(authInstance?.currentUser ?? null);
     return () => {};
   }
 }
 
 /**
  * Verifies whether a signed-in User is authenticated for the Admin Panel.
- * Any valid signed-in user is permitted to access the Admin Panel.
+ * Any valid Google authenticated user (user !== null) is permitted to enter the Admin Dashboard.
  */
 export async function verifyAdminAuthorization(user: User | null): Promise<boolean> {
   if (!user) return false;
@@ -178,6 +166,15 @@ export async function verifyAdminAuthorization(user: User | null): Promise<boole
 }
 
 export function formatAuthErrorMessage(error: unknown): string {
+  if (typeof error === 'string' && error.trim().length > 0) {
+    if (error.includes('auth/unauthorized-domain')) {
+      return 'This website is not authorized in Firebase Authentication.';
+    }
+    if (!error.includes('auth/')) {
+      return error;
+    }
+  }
+
   const rawMessage = error instanceof Error ? error.message : String(error);
   const code =
     typeof error === 'object' && error !== null && 'code' in error
@@ -185,7 +182,7 @@ export function formatAuthErrorMessage(error: unknown): string {
       : '';
 
   if (code.includes('auth/unauthorized-domain') || rawMessage.includes('auth/unauthorized-domain')) {
-    return 'Google sign-in is not enabled for this website domain.';
+    return 'This website is not authorized in Firebase Authentication.';
   }
 
   return 'Unable to sign in. Please try again.';
@@ -197,8 +194,7 @@ export function completeRedirectSignIn(): Promise<{ user: User | null; error: st
   }
   if (!redirectResultPromise) {
     const activeAuth = authInstance;
-    redirectResultPromise = persistenceReadyPromise
-      .then(() => getRedirectResult(activeAuth))
+    redirectResultPromise = getRedirectResult(activeAuth)
       .then((result) => ({
         user: result?.user ?? activeAuth.currentUser ?? null,
         error: null,
@@ -218,13 +214,18 @@ export async function signInAdminWithGoogle(): Promise<User | null> {
   if (authInstance.currentUser) {
     return authInstance.currentUser;
   }
-  await persistenceReadyPromise;
+  try {
+    await setPersistence(authInstance, browserLocalPersistence);
+  } catch (err) {
+    console.warn('Persistence configuration warning:', err);
+  }
   await signInWithRedirect(authInstance, googleProviderInstance);
   return null;
 }
 
 export async function signOutAdmin(): Promise<void> {
   if (!authInstance) return;
+  redirectResultPromise = null;
   try {
     await firebaseSignOut(authInstance);
   } catch {
@@ -232,5 +233,11 @@ export async function signOutAdmin(): Promise<void> {
   }
 }
 
-export { onAuthStateChanged, signInWithRedirect, getRedirectResult };
+export {
+  onAuthStateChanged,
+  signInWithRedirect,
+  getRedirectResult,
+  setPersistence,
+  browserLocalPersistence,
+};
 export type { User };

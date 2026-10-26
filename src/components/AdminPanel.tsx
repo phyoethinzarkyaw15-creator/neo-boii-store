@@ -43,12 +43,25 @@ export type AdminTab =
   | 'image-upload'
   | 'settings';
 
+export type AdminUiState =
+  | 'LOGIN'
+  | 'AUTHENTICATING'
+  | 'AUTHENTICATED'
+  | 'LOADING_PRODUCTS'
+  | 'READY'
+  | 'ERROR';
+
 interface AdminPanelProps {
   activeTab: AdminTab;
   onSelectTab: (tab: AdminTab) => void;
   products: PubgAccountProduct[];
   firebaseUser: User | null;
+  adminState?: AdminUiState;
+  onAdminStateChange?: (state: AdminUiState) => void;
+  onUserAuthenticated?: (user: User) => void;
+  onUserSignedOut?: () => void;
   initialAuthError?: string | null;
+  productLoadError?: string | null;
   onCreateProduct: (input: ProductFormInput) => Promise<void>;
   onUpdateProduct: (originalId: string, input: ProductFormInput) => Promise<void>;
   onDeleteProduct: (productId: string) => Promise<void>;
@@ -79,7 +92,12 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   onSelectTab,
   products,
   firebaseUser,
+  adminState = 'LOGIN',
+  onAdminStateChange,
+  onUserAuthenticated,
+  onUserSignedOut,
   initialAuthError = null,
+  productLoadError = null,
   onCreateProduct,
   onUpdateProduct,
   onDeleteProduct,
@@ -116,19 +134,29 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   const replaceFileInputRef = useRef<HTMLInputElement | null>(null);
 
   const isAuthenticated = firebaseUser !== null;
+  const isAuthenticatingState = isSigningIn || adminState === 'AUTHENTICATING';
   const displayedAuthError = authError || initialAuthError;
 
   const metrics: AdminDashboardMetrics = computeDashboardMetrics(products);
 
   const handleGoogleLogin = async () => {
-    if (firebaseUser) return;
+    if (firebaseUser) {
+      onUserAuthenticated?.(firebaseUser);
+      return;
+    }
     setAuthError(null);
     setIsSigningIn(true);
+    onAdminStateChange?.('AUTHENTICATING');
     try {
-      await signInAdminWithGoogle();
+      const signedInUser = await signInAdminWithGoogle();
+      if (signedInUser) {
+        setIsSigningIn(false);
+        onUserAuthenticated?.(signedInUser);
+      }
     } catch (err) {
       setAuthError(formatAuthErrorMessage(err));
       setIsSigningIn(false);
+      onAdminStateChange?.('ERROR');
     }
   };
 
@@ -633,61 +661,63 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
         style={{ display: isAuthenticated ? 'none' : 'block' }}
         className="max-w-md mx-auto px-4 py-12 sm:py-20"
       >
-        <div
-          className="rounded-xl p-6 sm:p-8 neo-surface-card space-y-6 text-center"
-          style={{
-            background: 'linear-gradient(180deg, #101116 0%, #0A0B0E 100%)',
-            border: '1px solid rgba(255, 255, 255, 0.1)',
-            borderRadius: '12px',
-            padding: '28px 24px',
-            textAlign: 'center',
-          }}
-        >
-          <div className="space-y-1.5">
-            <div
-              className="text-xs font-mono uppercase tracking-[0.22em] text-[#C5A059]"
-              style={{ color: '#C5A059', letterSpacing: '0.22em', fontSize: '12px' }}
-            >
-              NEO EMPIRE
-            </div>
-            <h1
-              className="font-display text-2xl sm:text-3xl font-bold text-[#F4F2ED]"
-              style={{ color: '#F4F2ED', fontWeight: 700, margin: '6px 0 0 0' }}
-            >
-              Admin Panel
-            </h1>
-          </div>
-
-          {displayedAuthError && (
-            <div
-              role="alert"
-              className="p-3.5 rounded-lg bg-amber-950/40 border border-amber-500/40 text-xs text-amber-200 flex items-start gap-2.5 text-left"
-            >
-              <AlertCircle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
-              <span className="break-words">{displayedAuthError}</span>
-            </div>
-          )}
-
-          <button
-            type="button"
-            disabled={isSigningIn}
-            onClick={handleGoogleLogin}
-            className="w-full min-h-[48px] py-3.5 px-5 rounded-lg gold-metallic-button text-xs sm:text-sm font-bold tracking-wider flex items-center justify-center gap-2 cursor-pointer"
+        {!isAuthenticated && (
+          <div
+            className="rounded-xl p-6 sm:p-8 neo-surface-card space-y-6 text-center"
             style={{
-              width: '100%',
-              minHeight: '48px',
-              padding: '14px 20px',
-              borderRadius: '8px',
-              background: 'linear-gradient(180deg, #DEC07A 0%, #C5A059 55%, #A37E3B 100%)',
-              color: '#08080A',
-              fontWeight: 700,
-              cursor: isSigningIn ? 'wait' : 'pointer',
+              background: 'linear-gradient(180deg, #101116 0%, #0A0B0E 100%)',
+              border: '1px solid rgba(255, 255, 255, 0.1)',
+              borderRadius: '12px',
+              padding: '28px 24px',
+              textAlign: 'center',
             }}
           >
-            <LogIn className="w-4 h-4 shrink-0" />
-            <span>{isSigningIn ? 'Signing in…' : 'Continue with Google'}</span>
-          </button>
-        </div>
+            <div className="space-y-1.5">
+              <div
+                className="text-xs font-mono uppercase tracking-[0.22em] text-[#C5A059]"
+                style={{ color: '#C5A059', letterSpacing: '0.22em', fontSize: '12px' }}
+              >
+                NEO EMPIRE
+              </div>
+              <h1
+                className="font-display text-2xl sm:text-3xl font-bold text-[#F4F2ED]"
+                style={{ color: '#F4F2ED', fontWeight: 700, margin: '6px 0 0 0' }}
+              >
+                Admin Panel
+              </h1>
+            </div>
+
+            {displayedAuthError && (
+              <div
+                role="alert"
+                className="p-3.5 rounded-lg bg-amber-950/40 border border-amber-500/40 text-xs text-amber-200 flex items-start gap-2.5 text-left"
+              >
+                <AlertCircle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                <span className="break-words">{displayedAuthError}</span>
+              </div>
+            )}
+
+            <button
+              type="button"
+              disabled={isAuthenticatingState}
+              onClick={handleGoogleLogin}
+              className="w-full min-h-[48px] py-3.5 px-5 rounded-lg gold-metallic-button text-xs sm:text-sm font-bold tracking-wider flex items-center justify-center gap-2 cursor-pointer"
+              style={{
+                width: '100%',
+                minHeight: '48px',
+                padding: '14px 20px',
+                borderRadius: '8px',
+                background: 'linear-gradient(180deg, #DEC07A 0%, #C5A059 55%, #A37E3B 100%)',
+                color: '#08080A',
+                fontWeight: 700,
+                cursor: isAuthenticatingState ? 'wait' : 'pointer',
+              }}
+            >
+              <LogIn className="w-4 h-4 shrink-0" />
+              <span>{isAuthenticatingState ? 'Signing in...' : 'Continue with Google'}</span>
+            </button>
+          </div>
+        )}
       </section>
 
       {/* 2. Admin Dashboard (Hidden when user === null, Visible only when user !== null) */}
@@ -731,6 +761,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                   type="button"
                   onClick={async () => {
                     await signOutAdmin();
+                    onUserSignedOut?.();
                   }}
                   className="neo-dark-button min-h-[46px] px-3.5 py-2.5 rounded-lg text-xs font-medium flex items-center justify-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0"
                 >
@@ -739,6 +770,29 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                 </button>
               </div>
             </div>
+
+      {/* Firestore Product Load Error Banner (Keeps user inside Admin Dashboard) */}
+      {productLoadError && (
+        <div
+          role="alert"
+          data-testid="admin-product-load-error"
+          className="p-4 rounded-lg border bg-amber-950/40 border-amber-500/40 text-amber-200 flex items-center gap-3 text-xs sm:text-sm"
+        >
+          <AlertCircle className="w-4 h-4 text-amber-400 shrink-0" />
+          <span className="break-words">{productLoadError}</span>
+        </div>
+      )}
+
+      {/* Loading Products Indicator */}
+      {adminState === 'LOADING_PRODUCTS' && (
+        <div
+          role="status"
+          className="p-4 rounded-lg border border-white/10 bg-[#101116] text-xs font-mono text-[#E5C878] flex items-center gap-2.5"
+        >
+          <RefreshCw className="w-3.5 h-3.5 animate-spin shrink-0" />
+          <span>Loading store products...</span>
+        </div>
+      )}
 
       {/* Status Notification Banner */}
       {actionBanner && (

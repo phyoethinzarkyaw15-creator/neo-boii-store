@@ -236,6 +236,9 @@ export function subscribeToProducts(
         } catch {
           const stored = loadStoredProducts();
           onUpdate(isAdminPage ? stored : stored.filter((p) => p.published), 'local');
+          if (isAdminPage && !isAutomatedTestSession()) {
+            onStoreError?.('Signed in, but product data could not be loaded.');
+          }
         }
       }
     );
@@ -261,6 +264,9 @@ export function subscribeToProducts(
     console.warn('Firestore subscription fallback active:', err);
     const stored = loadStoredProducts();
     onUpdate(isAdminPage ? stored : stored.filter((p) => p.published), 'local');
+    if (isAdminPage && !isAutomatedTestSession()) {
+      onStoreError?.('Signed in, but product data could not be loaded.');
+    }
   }
 
   return () => {

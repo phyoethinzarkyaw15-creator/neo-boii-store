@@ -160,7 +160,7 @@ test('validateImageFileMeta enforces MIME type and 8MB size limit', () => {
 test('formatAuthErrorMessage maps Firebase error codes to clean user-facing messages', () => {
   assert.equal(
     formatAuthErrorMessage({ code: 'auth/unauthorized-domain' }),
-    'Google sign-in is not enabled for this website domain.'
+    'This website is not authorized in Firebase Authentication.'
   );
   for (const code of [
     'auth/popup-closed-by-user',
@@ -175,3 +175,4 @@ test('formatAuthErrorMessage maps Firebase error codes to clean user-facing mess
     );
   }
 });
+

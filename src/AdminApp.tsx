@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { ExternalLink, ShieldCheck } from 'lucide-react';
 import {
   AccountStatus,
@@ -7,7 +7,9 @@ import {
 } from './types/store';
 import { NEO_EMPIRE_LOGO_SRC, handleLogoImageError } from './utils/brandAssets';
 import {
+  auth,
   completeRedirectSignIn,
+  formatAuthErrorMessage,
   subscribeToAuthState,
   User,
 } from './services/firebase';
@@ -21,53 +23,206 @@ import {
   updateProductPrice,
   updateProductStatus,
 } from './services/productService';
-import { AdminPanel, AdminTab } from './components/AdminPanel';
+import { AdminPanel, AdminTab, AdminUiState } from './components/AdminPanel';
 import { AccountDetailModal } from './components/AccountDetailModal';
+
+declare global {
+  interface Window {
+    __NEO_ADMIN_AUTH_CONTROLLER__?: {
+      getState: () => {
+        authInitialized: boolean;
+        adminState: AdminUiState;
+        hasUser: boolean;
+      };
+      handleAuthenticatedUser: (user: User) => void;
+      showLoginScreen: () => void;
+      showLoginError: (error: unknown) => void;
+      simulateFirestoreLoadError: () => void;
+    };
+  }
+}
+
+function syncAdminDomVisibility(authenticated: boolean): void {
+  if (typeof document === 'undefined') return;
+  const loginScreen = document.getElementById('admin-login-screen');
+  const adminDashboard = document.getElementById('admin-dashboard');
+  if (loginScreen) {
+    loginScreen.style.display = authenticated ? 'none' : 'block';
+    loginScreen.hidden = authenticated;
+  }
+  if (adminDashboard) {
+    adminDashboard.style.display = authenticated ? 'block' : 'none';
+    adminDashboard.hidden = !authenticated;
+  }
+}
 
 export default function AdminApp() {
   const [products, setProducts] = useState<PubgAccountProduct[]>([]);
-  const [firebaseUser, setFirebaseUser] = useState<User | null>(null);
+  const [currentUser, setCurrentUser] = useState<User | null>(() => auth?.currentUser ?? null);
+  const [authInitialized, setAuthInitialized] = useState<boolean>(() => Boolean(auth?.currentUser));
+  const [adminState, setAdminState] = useState<AdminUiState>(() =>
+    auth?.currentUser ? 'AUTHENTICATED' : 'LOGIN'
+  );
   const [redirectAuthError, setRedirectAuthError] = useState<string | null>(null);
+  const [productLoadError, setProductLoadError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<AdminTab>('dashboard');
   const [selectedProduct, setSelectedProduct] = useState<PubgAccountProduct | null>(null);
 
+  const dashboardInitializedRef = useRef<boolean>(false);
+  const currentUserRef = useRef<User | null>(auth?.currentUser ?? null);
+  const redirectAuthErrorRef = useRef<string | null>(null);
+  const productsUnsubRef = useRef<(() => void) | null>(null);
+
+  const initializeAdminDashboard = useCallback((user: User) => {
+    if (!user) return;
+    if (productsUnsubRef.current) {
+      productsUnsubRef.current();
+      productsUnsubRef.current = null;
+    }
+
+    setAdminState('LOADING_PRODUCTS');
+    setProductLoadError(null);
+    setProducts(loadStoredProducts());
+
+    productsUnsubRef.current = subscribeToProducts(
+      true,
+      (updatedProducts) => {
+        setProducts(updatedProducts);
+        setAdminState((prev) => (prev === 'ERROR' ? 'ERROR' : 'READY'));
+      },
+      (storeError) => {
+        if (storeError) {
+          setProductLoadError('Signed in, but product data could not be loaded.');
+          setAdminState('ERROR');
+        } else {
+          setProductLoadError(null);
+          setAdminState('READY');
+        }
+      }
+    );
+  }, []);
+
+  const handleAuthenticatedUser = useCallback(
+    (user: User) => {
+      if (!user) return;
+      currentUserRef.current = user;
+      redirectAuthErrorRef.current = null;
+      setCurrentUser(user);
+      setAuthInitialized(true);
+      setRedirectAuthError(null);
+      syncAdminDomVisibility(true);
+
+      if (dashboardInitializedRef.current) {
+        return;
+      }
+      dashboardInitializedRef.current = true;
+      setAdminState('AUTHENTICATED');
+      initializeAdminDashboard(user);
+    },
+    [initializeAdminDashboard]
+  );
+
+  const showLoginScreen = useCallback(() => {
+    if (auth?.currentUser) {
+      handleAuthenticatedUser(auth.currentUser);
+      return;
+    }
+    currentUserRef.current = null;
+    dashboardInitializedRef.current = false;
+    if (productsUnsubRef.current) {
+      productsUnsubRef.current();
+      productsUnsubRef.current = null;
+    }
+    setCurrentUser(null);
+    setAuthInitialized(true);
+    setProducts([]);
+    setProductLoadError(null);
+    setAdminState(redirectAuthErrorRef.current ? 'ERROR' : 'LOGIN');
+    syncAdminDomVisibility(false);
+  }, [handleAuthenticatedUser]);
+
+  const showLoginError = useCallback((error: unknown) => {
+    if (auth?.currentUser || currentUserRef.current) {
+      return;
+    }
+    const message = formatAuthErrorMessage(error);
+    redirectAuthErrorRef.current = message;
+    setRedirectAuthError(message);
+    setAuthInitialized(true);
+    setAdminState('ERROR');
+    syncAdminDomVisibility(false);
+  }, []);
+
   useEffect(() => {
     let isMounted = true;
+
+    if (auth?.currentUser) {
+      handleAuthenticatedUser(auth.currentUser);
+    }
+
+    // Step 2 — Handle redirect result safely
+    completeRedirectSignIn()
+      .then(({ user, error }) => {
+        if (!isMounted) return;
+        if (user) {
+          handleAuthenticatedUser(user);
+        } else if (error) {
+          showLoginError(error);
+        }
+      })
+      .catch((error) => {
+        if (!isMounted) return;
+        showLoginError(error);
+      });
+
+    // Step 3 — Listen to auth state changes (final authority)
     const unsubAuth = subscribeToAuthState((user) => {
       if (!isMounted) return;
-      setFirebaseUser(user);
       if (user) {
-        setRedirectAuthError(null);
-      }
-    });
-
-    completeRedirectSignIn().then(({ user, error }) => {
-      if (!isMounted) return;
-      if (user) {
-        setFirebaseUser(user);
-        setRedirectAuthError(null);
-      } else if (error) {
-        setRedirectAuthError(error);
+        handleAuthenticatedUser(user);
+      } else {
+        showLoginScreen();
       }
     });
 
     return () => {
       isMounted = false;
+      dashboardInitializedRef.current = false;
       unsubAuth();
+      if (productsUnsubRef.current) {
+        productsUnsubRef.current();
+        productsUnsubRef.current = null;
+      }
     };
-  }, []);
+  }, [handleAuthenticatedUser, showLoginError, showLoginScreen]);
 
   useEffect(() => {
-    if (!firebaseUser) {
-      setProducts([]);
-      return;
-    }
-    setProducts(loadStoredProducts());
-    const unsubProducts = subscribeToProducts(true, (updatedProducts) => {
-      setProducts(updatedProducts);
-    });
-    return () => unsubProducts();
-  }, [firebaseUser]);
+    if (typeof window === 'undefined') return;
+    window.__NEO_ADMIN_AUTH_CONTROLLER__ = {
+      getState: () => ({
+        authInitialized,
+        adminState,
+        hasUser: currentUser !== null,
+      }),
+      handleAuthenticatedUser,
+      showLoginScreen,
+      showLoginError,
+      simulateFirestoreLoadError: () => {
+        setProductLoadError('Signed in, but product data could not be loaded.');
+        setAdminState('ERROR');
+      },
+    };
+    return () => {
+      delete window.__NEO_ADMIN_AUTH_CONTROLLER__;
+    };
+  }, [
+    adminState,
+    authInitialized,
+    currentUser,
+    handleAuthenticatedUser,
+    showLoginError,
+    showLoginScreen,
+  ]);
 
   const handleCreateProduct = async (input: ProductFormInput) => {
     const next = await createOrSaveProduct(input, products);
@@ -99,7 +254,7 @@ export default function AdminApp() {
     setProducts(next);
   };
 
-  const isAuthenticated = firebaseUser !== null;
+  const isAuthenticated = currentUser !== null;
 
   const navItems: Array<{ id: AdminTab; label: string }> = [
     { id: 'dashboard', label: 'Dashboard' },
@@ -110,6 +265,8 @@ export default function AdminApp() {
 
   return (
     <div
+      data-admin-state={adminState}
+      data-auth-initialized={String(authInitialized)}
       className="min-h-screen flex flex-col bg-[#08080A] text-[#F4F2ED]"
       style={{ minHeight: '100vh', backgroundColor: '#08080A', color: '#F4F2ED' }}
     >
@@ -211,8 +368,13 @@ export default function AdminApp() {
           activeTab={activeTab}
           onSelectTab={setActiveTab}
           products={products}
-          firebaseUser={firebaseUser}
+          firebaseUser={currentUser}
+          adminState={adminState}
+          onAdminStateChange={setAdminState}
+          onUserAuthenticated={handleAuthenticatedUser}
+          onUserSignedOut={showLoginScreen}
           initialAuthError={redirectAuthError}
+          productLoadError={productLoadError}
           onCreateProduct={handleCreateProduct}
           onUpdateProduct={handleUpdateProduct}
           onDeleteProduct={handleDeleteProduct}
