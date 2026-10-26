@@ -1,5 +1,5 @@
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
-import { auth, storage } from './firebase';
+import { storage } from './firebase';
 import { validateImageFileMeta } from '../utils/storeLogic';
 
 export interface ImageUploadProgress {
@@ -110,8 +110,8 @@ export async function uploadAccountImage(
     .replace(/[^a-zA-Z0-9_-]/g, '_')
     .slice(0, 40);
 
-  // 1. Try Firebase Storage upload when authenticated and storage bucket is initialized
-  if (storage && auth?.currentUser) {
+  // 1. Try Firebase Storage upload when storage bucket is initialized
+  if (storage) {
     try {
       const storagePath = `products/${safeProductId}/${Date.now()}_${safeBaseName}.webp`;
       const storageRef = ref(storage, storagePath);

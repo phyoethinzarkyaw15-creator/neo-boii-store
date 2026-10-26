@@ -6,7 +6,6 @@ import {
   Upload,
   Eye,
   EyeOff,
-  LogIn,
   LogOut,
   Check,
   AlertCircle,
@@ -27,12 +26,6 @@ import {
   validateProductInput,
 } from '../utils/storeLogic';
 import { ImageUploadProgress, uploadAccountImage } from '../services/imageService';
-import {
-  formatAuthErrorMessage,
-  signInAdminWithGoogle,
-  signOutAdmin,
-  User,
-} from '../services/firebase';
 import { ProductCard3D } from './ProductCard3D';
 
 export type AdminTab =
@@ -44,10 +37,6 @@ export type AdminTab =
   | 'settings';
 
 export type AdminUiState =
-  | 'CHECKING_AUTH'
-  | 'LOGIN'
-  | 'AUTHENTICATING'
-  | 'AUTHENTICATED'
   | 'LOADING_PRODUCTS'
   | 'READY'
   | 'ERROR';
@@ -56,13 +45,7 @@ interface AdminPanelProps {
   activeTab: AdminTab;
   onSelectTab: (tab: AdminTab) => void;
   products: PubgAccountProduct[];
-  firebaseUser: User | null;
-  authInitialized?: boolean;
   adminState?: AdminUiState;
-  onAdminStateChange?: (state: AdminUiState) => void;
-  onUserAuthenticated?: (user: User) => void;
-  onUserSignedOut?: () => void;
-  initialAuthError?: string | null;
   productLoadError?: string | null;
   onCreateProduct: (input: ProductFormInput) => Promise<void>;
   onUpdateProduct: (originalId: string, input: ProductFormInput) => Promise<void>;
@@ -93,13 +76,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   activeTab,
   onSelectTab,
   products,
-  firebaseUser,
-  authInitialized = true,
-  adminState = 'LOGIN',
-  onAdminStateChange,
-  onUserAuthenticated,
-  onUserSignedOut,
-  initialAuthError = null,
+  adminState = 'READY',
   productLoadError = null,
   onCreateProduct,
   onUpdateProduct,
@@ -109,9 +86,6 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   onTogglePublished,
   onInspectProduct,
 }) => {
-  const [authError, setAuthError] = useState<string | null>(null);
-  const [isSigningIn, setIsSigningIn] = useState(false);
-
   // Form State for Add / Edit Account
   const [editingOriginalId, setEditingOriginalId] = useState<string | null>(null);
   const [formState, setFormState] = useState<ProductFormInput>(() =>
@@ -136,34 +110,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   const additionalImagesInputRef = useRef<HTMLInputElement | null>(null);
   const replaceFileInputRef = useRef<HTMLInputElement | null>(null);
 
-  const isAuthenticated = firebaseUser !== null;
-  const isCheckingAuth = !isAuthenticated && (!authInitialized || adminState === 'CHECKING_AUTH');
-  const shouldShowLoginScreen = !isAuthenticated && !isCheckingAuth;
-  const isAuthenticatingState = isSigningIn || adminState === 'AUTHENTICATING';
-  const displayedAuthError = authError || initialAuthError;
-
   const metrics: AdminDashboardMetrics = computeDashboardMetrics(products);
-
-  const handleGoogleLogin = async () => {
-    if (firebaseUser) {
-      onUserAuthenticated?.(firebaseUser);
-      return;
-    }
-    setAuthError(null);
-    setIsSigningIn(true);
-    onAdminStateChange?.('AUTHENTICATING');
-    try {
-      const signedInUser = await signInAdminWithGoogle();
-      if (signedInUser) {
-        setIsSigningIn(false);
-        onUserAuthenticated?.(signedInUser);
-      }
-    } catch (err) {
-      setAuthError(formatAuthErrorMessage(err));
-      setIsSigningIn(false);
-      onAdminStateChange?.('ERROR');
-    }
-  };
 
   const startAddAccount = () => {
     const freshForm = createEmptyFormState(products.length + 1);
@@ -384,6 +331,12 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     }
   };
 
+  const handleLogout = () => {
+    if (typeof window !== 'undefined') {
+      window.location.href = '/index.html';
+    }
+  };
+
   const previewProduct: PubgAccountProduct = {
     ...formState,
     name: formState.name || 'Account Name',
@@ -393,7 +346,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
       .map((l) => l.trim())
       .filter(Boolean),
     mainImage: formState.mainImage || formState.images[0] || '',
-    authorId: firebaseUser?.uid || 'neo_empire_admin',
+    authorId: 'neo_empire_admin',
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   };
@@ -415,7 +368,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
           className="gold-metallic-button min-h-[42px] px-4 py-2 rounded-lg text-xs font-bold uppercase tracking-wider inline-flex items-center gap-1.5 cursor-pointer"
         >
           <Plus className="w-4 h-4 shrink-0" />
-          <span>Add Account</span>
+          <span>Add PUBG Account</span>
         </button>
       </div>
 
@@ -428,7 +381,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
             NOT AVAILABLE
           </h3>
           <p className="text-sm text-zinc-400 max-w-md mx-auto">
-            No accounts have been added yet. Tap Add Account to create your first PUBG account
+            No accounts have been added yet. Tap Add PUBG Account to create your first PUBG account
             listing.
           </p>
           <div className="pt-1">
@@ -438,7 +391,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
               className="gold-metallic-button min-h-[48px] px-5 py-3 rounded-lg text-xs font-bold uppercase tracking-wider inline-flex items-center gap-2 cursor-pointer"
             >
               <Plus className="w-4 h-4" />
-              <span>Add Account</span>
+              <span>Add PUBG Account</span>
             </button>
           </div>
         </div>
@@ -657,161 +610,51 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   );
 
   return (
-    <>
-      {/* 0. Initial Authentication Loading State (Prevents flashing Login Screen after Google redirect) */}
-      <section
-        id="admin-auth-loading"
-        data-testid="admin-auth-loading"
-        hidden={!isCheckingAuth}
-        style={{ display: isCheckingAuth ? 'block' : 'none' }}
-        className="max-w-md mx-auto px-4 py-12 sm:py-20"
-      >
-        {isCheckingAuth && (
-          <div
-            className="rounded-xl p-6 sm:p-8 neo-surface-card space-y-3 text-center"
-            style={{
-              background: 'linear-gradient(180deg, #101116 0%, #0A0B0E 100%)',
-              border: '1px solid rgba(255, 255, 255, 0.1)',
-              borderRadius: '12px',
-              padding: '28px 24px',
-              textAlign: 'center',
-            }}
-          >
-            <div
-              className="text-xs font-mono uppercase tracking-[0.22em] text-[#C5A059]"
-              style={{ color: '#C5A059', letterSpacing: '0.22em', fontSize: '12px' }}
-            >
-              NEO EMPIRE
-            </div>
-            <div
-              className="font-display text-lg font-semibold text-[#F4F2ED]"
-              style={{ color: '#F4F2ED', fontWeight: 600, fontSize: '18px' }}
-            >
-              Checking authentication…
-            </div>
+    <section
+      id="admin-dashboard"
+      data-testid="admin-dashboard"
+      style={{ display: 'block' }}
+      className="max-w-[1240px] mx-auto px-3.5 sm:px-8 py-6 sm:py-10 space-y-6 sm:space-y-8"
+    >
+      {/* Top Action Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-5 border-b border-white/[0.08]">
+        <div className="min-w-0">
+          <div className="text-[11px] sm:text-xs font-mono uppercase tracking-[0.18em] text-[#C5A059] truncate">
+            NEO EMPIRE · PRODUCT MANAGEMENT
           </div>
-        )}
-      </section>
+          <h1 className="font-display text-xl sm:text-3xl font-bold text-[#F4F2ED] mt-0.5 truncate">
+            {activeTab === 'dashboard' && 'Admin Dashboard'}
+            {activeTab === 'products' && 'Product Management'}
+            {activeTab === 'add-product' && 'Add PUBG Account'}
+            {activeTab === 'edit-product' &&
+              (editingOriginalId ? `Edit Account (${editingOriginalId})` : 'Edit Account')}
+            {activeTab === 'image-upload' && 'Account Image Upload'}
+            {activeTab === 'settings' && 'Store Settings'}
+          </h1>
+        </div>
 
-      {/* 1. Admin Login Screen (Visible only when auth check completes and user === null) */}
-      <section
-        id="admin-login-screen"
-        data-testid="admin-login-screen"
-        hidden={!shouldShowLoginScreen}
-        style={{ display: shouldShowLoginScreen ? 'block' : 'none' }}
-        className="max-w-md mx-auto px-4 py-12 sm:py-20"
-      >
-        {shouldShowLoginScreen && (
-          <div
-            className="rounded-xl p-6 sm:p-8 neo-surface-card space-y-6 text-center"
-            style={{
-              background: 'linear-gradient(180deg, #101116 0%, #0A0B0E 100%)',
-              border: '1px solid rgba(255, 255, 255, 0.1)',
-              borderRadius: '12px',
-              padding: '28px 24px',
-              textAlign: 'center',
-            }}
+        <div className="flex flex-wrap items-center gap-2.5">
+          <button
+            type="button"
+            onClick={startAddAccount}
+            className="gold-metallic-button min-h-[46px] px-4 py-2.5 rounded-lg text-xs font-bold uppercase tracking-wider flex items-center justify-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0 flex-1 sm:flex-initial"
           >
-            <div className="space-y-1.5">
-              <div
-                className="text-xs font-mono uppercase tracking-[0.22em] text-[#C5A059]"
-                style={{ color: '#C5A059', letterSpacing: '0.22em', fontSize: '12px' }}
-              >
-                NEO EMPIRE
-              </div>
-              <h1
-                className="font-display text-2xl sm:text-3xl font-bold text-[#F4F2ED]"
-                style={{ color: '#F4F2ED', fontWeight: 700, margin: '6px 0 0 0' }}
-              >
-                Admin Panel
-              </h1>
-            </div>
+            <Plus className="w-4 h-4 shrink-0" />
+            <span>Add PUBG Account</span>
+          </button>
 
-            {displayedAuthError && (
-              <div
-                role="alert"
-                className="p-3.5 rounded-lg bg-amber-950/40 border border-amber-500/40 text-xs text-amber-200 flex items-start gap-2.5 text-left"
-              >
-                <AlertCircle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
-                <span className="break-words">{displayedAuthError}</span>
-              </div>
-            )}
+          <button
+            type="button"
+            onClick={handleLogout}
+            className="neo-dark-button min-h-[46px] px-3.5 py-2.5 rounded-lg text-xs font-mono font-bold uppercase tracking-wider flex items-center justify-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0"
+          >
+            <LogOut className="w-3.5 h-3.5 shrink-0" />
+            <span>LOGOUT</span>
+          </button>
+        </div>
+      </div>
 
-            <button
-              type="button"
-              disabled={isAuthenticatingState}
-              onClick={handleGoogleLogin}
-              className="w-full min-h-[48px] py-3.5 px-5 rounded-lg gold-metallic-button text-xs sm:text-sm font-bold tracking-wider flex items-center justify-center gap-2 cursor-pointer"
-              style={{
-                width: '100%',
-                minHeight: '48px',
-                padding: '14px 20px',
-                borderRadius: '8px',
-                background: 'linear-gradient(180deg, #DEC07A 0%, #C5A059 55%, #A37E3B 100%)',
-                color: '#08080A',
-                fontWeight: 700,
-                cursor: isAuthenticatingState ? 'wait' : 'pointer',
-              }}
-            >
-              <LogIn className="w-4 h-4 shrink-0" />
-              <span>{isAuthenticatingState ? 'Signing in...' : 'Continue with Google'}</span>
-            </button>
-          </div>
-        )}
-      </section>
-
-      {/* 2. Admin Dashboard (Hidden when user === null, Visible only when user !== null) */}
-      <section
-        id="admin-dashboard"
-        data-testid="admin-dashboard"
-        hidden={!isAuthenticated}
-        style={{ display: isAuthenticated ? 'block' : 'none' }}
-        className="max-w-[1240px] mx-auto px-3.5 sm:px-8 py-6 sm:py-10 space-y-6 sm:space-y-8"
-      >
-        {isAuthenticated && (
-          <>
-            {/* Top Action Header (No duplicated logo image) */}
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-5 border-b border-white/[0.08]">
-              <div className="min-w-0">
-                <div className="text-[11px] sm:text-xs font-mono uppercase tracking-[0.18em] text-[#C5A059] truncate">
-                  NEO EMPIRE · PRODUCT MANAGEMENT
-                </div>
-                <h1 className="font-display text-xl sm:text-3xl font-bold text-[#F4F2ED] mt-0.5 truncate">
-                  {activeTab === 'dashboard' && 'Admin Dashboard'}
-                  {activeTab === 'products' && 'Product Management'}
-                  {activeTab === 'add-product' && 'Add Account'}
-                  {activeTab === 'edit-product' &&
-                    (editingOriginalId ? `Edit Account (${editingOriginalId})` : 'Edit Account')}
-                  {activeTab === 'image-upload' && 'Image Upload'}
-                  {activeTab === 'settings' && 'Store Settings'}
-                </h1>
-              </div>
-
-              <div className="flex flex-wrap items-center gap-2.5">
-                <button
-                  type="button"
-                  onClick={startAddAccount}
-                  className="gold-metallic-button min-h-[46px] px-4 py-2.5 rounded-lg text-xs font-bold uppercase tracking-wider flex items-center justify-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0 flex-1 sm:flex-initial"
-                >
-                  <Plus className="w-4 h-4 shrink-0" />
-                  <span>Add Account</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={async () => {
-                    await signOutAdmin();
-                    onUserSignedOut?.();
-                  }}
-                  className="neo-dark-button min-h-[46px] px-3.5 py-2.5 rounded-lg text-xs font-medium flex items-center justify-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0"
-                >
-                  <LogOut className="w-3.5 h-3.5 shrink-0" />
-                  <span>Sign Out</span>
-                </button>
-              </div>
-            </div>
-
-      {/* Firestore Product Load Error Banner (Keeps user inside Admin Dashboard) */}
+      {/* Firestore Product Load Error Banner */}
       {productLoadError && (
         <div
           role="alert"
@@ -939,14 +782,14 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
               )}
             </div>
 
-            {/* Price (MMK) & Product ID */}
+            {/* MMK Price & Product ID */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
                 <label
                   htmlFor="field-price"
                   className="block text-xs font-medium text-zinc-300 mb-1.5"
                 >
-                  Price (MMK) * ({formatMmkPrice(formState.price || 0)})
+                  MMK Price * ({formatMmkPrice(formState.price || 0)})
                 </label>
                 <input
                   id="field-price"
@@ -1026,7 +869,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
 
               <div>
                 <label className="block text-xs font-medium text-zinc-300 mb-1.5">
-                  Published Status *
+                  Publication Status *
                 </label>
                 <div className="grid grid-cols-2 gap-1.5 p-1 rounded-lg bg-[#090A0D] border border-white/15">
                   <button
@@ -1038,7 +881,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                         : 'text-zinc-400 hover:text-white'
                     }`}
                   >
-                    Published
+                    PUBLISH
                   </button>
                   <button
                     type="button"
@@ -1049,17 +892,17 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                         : 'text-zinc-400 hover:text-white'
                     }`}
                   >
-                    Unpublished
+                    UNPUBLISH
                   </button>
                 </div>
               </div>
             </div>
 
-            {/* Account Image & Additional Images (Android Phone Gallery Selection + Preview) */}
+            {/* Account Image Upload & Additional Images */}
             <div className="p-4 rounded-lg bg-[#090A0D] border border-white/15 space-y-3.5">
               <div className="space-y-1">
                 <div className="text-xs font-mono uppercase tracking-wider text-[#C5A059]">
-                  Account Image & Additional Images ({formState.images.length}/8)
+                  Account Image Upload ({formState.images.length}/8)
                 </div>
                 <p className="text-xs text-zinc-400 leading-relaxed">
                   Select account images from your device (JPG, PNG, WEBP).
@@ -1096,7 +939,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                   className="min-h-[46px] px-4 py-2.5 rounded-lg gold-metallic-button text-xs font-bold uppercase tracking-wider flex items-center justify-center gap-2 cursor-pointer"
                 >
                   <Upload className="w-4 h-4 shrink-0" />
-                  <span>Account Image</span>
+                  <span>Account Image Upload</span>
                 </button>
 
                 <button
@@ -1276,7 +1119,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                 disabled={isSubmitting}
                 className="gold-metallic-button min-h-[48px] px-6 py-3 rounded-lg text-xs sm:text-sm font-bold uppercase tracking-wider cursor-pointer"
               >
-                {isSubmitting ? 'SAVING...' : 'SAVE ACCOUNT'}
+                {isSubmitting ? 'SAVING...' : 'SAVE'}
               </button>
             </div>
           </form>
@@ -1327,9 +1170,6 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
           </div>
         </div>
       )}
-          </>
-        )}
-      </section>
-    </>
+    </section>
   );
 };

@@ -8,7 +8,6 @@ import {
   validateProductInput,
 } from './storeLogic';
 import { AccountStatus, PubgAccountProduct } from '../types/store';
-import { formatAuthErrorMessage } from '../services/firebase';
 
 const testRecords: PubgAccountProduct[] = [
   {
@@ -23,7 +22,7 @@ const testRecords: PubgAccountProduct[] = [
     mainImage: '',
     importantNotes: 'Direct transfer via @Littleneoo.',
     published: true,
-    authorId: 'admin_1',
+    authorId: 'neo_empire_admin',
     createdAt: '2026-10-18T10:00:00.000Z',
     updatedAt: '2026-10-20T12:00:00.000Z',
   },
@@ -39,7 +38,7 @@ const testRecords: PubgAccountProduct[] = [
     mainImage: '',
     importantNotes: '',
     published: true,
-    authorId: 'admin_1',
+    authorId: 'neo_empire_admin',
     createdAt: '2026-10-19T10:00:00.000Z',
     updatedAt: '2026-10-21T01:00:00.000Z',
   },
@@ -55,7 +54,7 @@ const testRecords: PubgAccountProduct[] = [
     mainImage: '',
     importantNotes: '',
     published: false,
-    authorId: 'admin_1',
+    authorId: 'neo_empire_admin',
     createdAt: '2026-10-20T15:00:00.000Z',
     updatedAt: '2026-10-20T16:00:00.000Z',
   },
@@ -66,7 +65,7 @@ test('formatMmkPrice formats Myanmar Kyat prices with comma separators and MMK s
   assert.equal(formatMmkPrice(100000), '100,000 MMK');
   assert.equal(formatMmkPrice(150000), '150,000 MMK');
   assert.equal(formatMmkPrice(250000), '250,000 MMK');
-  assert.equal(formatMmkPrice(500000), '50,0000'.replace('50,0000', '500,000') + ' MMK');
+  assert.equal(formatMmkPrice(500000), '500,000 MMK');
 });
 
 test('validateProductInput accepts valid MMK product input (with or without images) and rejects invalid fields', () => {
@@ -156,23 +155,3 @@ test('validateImageFileMeta enforces MIME type and 8MB size limit', () => {
   assert.equal(validateImageFileMeta('script.exe', 'application/x-msdownload', 1024).valid, false);
   assert.equal(validateImageFileMeta('huge.png', 'image/png', 10 * 1024 * 1024).valid, false);
 });
-
-test('formatAuthErrorMessage maps Firebase error codes to clean user-facing messages', () => {
-  assert.equal(
-    formatAuthErrorMessage({ code: 'auth/unauthorized-domain' }),
-    'This website is not authorized in Firebase Authentication.'
-  );
-  for (const code of [
-    'auth/popup-closed-by-user',
-    'auth/cancelled-popup-request',
-    'auth/redirect-cancelled-by-user',
-    'auth/operation-not-allowed',
-    'auth/network-request-failed',
-  ]) {
-    assert.equal(
-      formatAuthErrorMessage({ code }),
-      'Unable to sign in. Please try again.'
-    );
-  }
-});
-

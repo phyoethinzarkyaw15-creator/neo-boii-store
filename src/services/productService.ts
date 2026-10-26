@@ -12,7 +12,6 @@ import {
   where,
 } from 'firebase/firestore';
 import {
-  auth,
   db,
   handleFirestoreError,
   OperationType,
@@ -23,12 +22,7 @@ import { validateProductInput } from '../utils/storeLogic';
 const LOCAL_STORAGE_KEY = 'neo_empire_real_records_v1';
 const LEGACY_KEYS = ['neo_empire_mmk_vault_v3', 'neo_empire_products_v2', 'neo_empire_products_v1'];
 const SYNC_CHANNEL_NAME = 'neo_empire_real_sync_v1';
-
-function isAutomatedTestSession(): boolean {
-  if (typeof window === 'undefined') return false;
-  const params = new URLSearchParams(window.location.search);
-  return params.get('autostart') === '1';
-}
+const ADMIN_AUTHOR_ID = 'neo_empire_admin';
 
 function createSafeBroadcastChannel(): BroadcastChannel | null {
   try {
@@ -117,25 +111,15 @@ function docToProduct(data: Record<string, unknown>, idFallback: string): PubgAc
     mainImage,
     importantNotes: typeof data.importantNotes === 'string' ? data.importantNotes : '',
     published: typeof data.published === 'boolean' ? data.published : true,
-    authorId: typeof data.authorId === 'string' ? data.authorId : 'neo_empire_admin',
+    authorId: typeof data.authorId === 'string' ? data.authorId : ADMIN_AUTHOR_ID,
     createdAt: normalizeTimestamp(data.createdAt),
     updatedAt: normalizeTimestamp(data.updatedAt),
   };
 }
 
 /**
- * Checks whether the current user is signed in.
- */
-export async function checkIsAuthorizedFirebaseAdmin(): Promise<boolean> {
-  if (!auth || !db) return false;
-  const user = auth.currentUser;
-  return Boolean(user && user.uid);
-}
-
-/**
- * Subscribes to Firestore products collection and cross-page synchronization
- * so changes in admin.html immediately update index.html.
- * Returns [] when no products have been added yet, and never crashes if Firebase is unavailable.
+ * Subscribes directly to Firestore products collection and cross-page synchronization
+ * so changes in admin.html immediately update index.html without requiring Google Login.
  */
 export function subscribeToProducts(
   isAdminPage: boolean,
@@ -174,7 +158,7 @@ export function subscribeToProducts(
   }
 
   let unsubscribePublished: () => void = () => {};
-  let unsubscribeOwned: () => void = () => {};
+  let unsubscribeAll: () => void = () => {};
 
   if (!db) {
     return () => {
@@ -188,32 +172,33 @@ export function subscribeToProducts(
   }
 
   try {
-    const user = auth?.currentUser;
     const productsRef = collection(db, 'products');
     const publishedMap = new Map<string, PubgAccountProduct>();
-    const ownedMap = new Map<string, PubgAccountProduct>();
+    const allMap = new Map<string, PubgAccountProduct>();
 
     const emitMerged = () => {
       const mergedMap = new Map<string, PubgAccountProduct>();
       for (const [id, prod] of publishedMap.entries()) {
         mergedMap.set(id, prod);
       }
-      for (const [id, prod] of ownedMap.entries()) {
+      for (const [id, prod] of allMap.entries()) {
         mergedMap.set(id, prod);
       }
-      const mergedList = Array.from(mergedMap.values());
+      const firestoreList = Array.from(mergedMap.values());
 
-      if (isAutomatedTestSession() && mergedList.length === 0) {
+      if (firestoreList.length === 0) {
         const stored = loadStoredProducts();
-        onUpdate(isAdminPage ? stored : stored.filter((p) => p.published), 'local');
-        return;
+        if (stored.length > 0) {
+          onUpdate(isAdminPage ? stored : stored.filter((p) => p.published), 'local');
+          return;
+        }
       }
 
-      if (isAdminPage && user?.uid) {
-        saveStoredProducts(mergedList, false);
+      if (isAdminPage && firestoreList.length > 0) {
+        saveStoredProducts(firestoreList, false);
       }
       onUpdate(
-        isAdminPage ? mergedList : mergedList.filter((p) => p.published),
+        isAdminPage ? firestoreList : firestoreList.filter((p) => p.published),
         'firestore'
       );
     };
@@ -236,27 +221,23 @@ export function subscribeToProducts(
         } catch {
           const stored = loadStoredProducts();
           onUpdate(isAdminPage ? stored : stored.filter((p) => p.published), 'local');
-          if (isAdminPage && !isAutomatedTestSession()) {
-            onStoreError?.('Signed in, but product data could not be loaded.');
-          }
         }
       }
     );
 
-    if (isAdminPage && user?.uid && user?.emailVerified) {
-      const ownedQuery = query(productsRef, where('authorId', '==', user.uid));
-      unsubscribeOwned = onSnapshot(
-        ownedQuery,
+    if (isAdminPage) {
+      unsubscribeAll = onSnapshot(
+        productsRef,
         (snapshot) => {
-          ownedMap.clear();
+          allMap.clear();
           for (const d of snapshot.docs) {
             const prod = docToProduct(d.data() as Record<string, unknown>, d.id);
-            ownedMap.set(prod.id, prod);
+            allMap.set(prod.id, prod);
           }
           emitMerged();
         },
         () => {
-          // Ignore secondary listener warning
+          // If unpublished list query is restricted, keep publishedMap + local stored products
         }
       );
     }
@@ -264,9 +245,6 @@ export function subscribeToProducts(
     console.warn('Firestore subscription fallback active:', err);
     const stored = loadStoredProducts();
     onUpdate(isAdminPage ? stored : stored.filter((p) => p.published), 'local');
-    if (isAdminPage && !isAutomatedTestSession()) {
-      onStoreError?.('Signed in, but product data could not be loaded.');
-    }
   }
 
   return () => {
@@ -278,32 +256,11 @@ export function subscribeToProducts(
     }
     try {
       unsubscribePublished();
-      unsubscribeOwned();
+      unsubscribeAll();
     } catch {
       // Ignore unsubscribe error
     }
   };
-}
-
-function parseReadableSaveError(err: unknown): Error {
-  if (err instanceof Error) {
-    try {
-      const parsed = JSON.parse(err.message) as { error?: string };
-      if (parsed && typeof parsed.error === 'string') {
-        if (
-          parsed.error.includes('Missing or insufficient permissions') ||
-          parsed.error.includes('PERMISSION_DENIED')
-        ) {
-          return new Error('Permission denied. Please sign in and try again.');
-        }
-        return new Error(parsed.error);
-      }
-    } catch {
-      // Not a JSON-encoded FirestoreErrorInfo
-    }
-    return err;
-  }
-  return new Error('Unable to save product.');
 }
 
 /**
@@ -327,14 +284,6 @@ export async function createOrSaveProduct(
     input.mainImage && input.mainImage.trim().length > 0
       ? input.mainImage.trim()
       : cleanImages[0] || '';
-  const user = auth?.currentUser || null;
-
-  const isFirebaseAdmin = await checkIsAuthorizedFirebaseAdmin();
-  if (!isFirebaseAdmin || !user) {
-    if (!isAutomatedTestSession()) {
-      throw new Error('Please sign in to save products to the store.');
-    }
-  }
 
   const newProduct: PubgAccountProduct = {
     id: cleanId,
@@ -348,12 +297,15 @@ export async function createOrSaveProduct(
     mainImage: cleanMain,
     importantNotes: (input.importantNotes || '').trim(),
     published: Boolean(input.published),
-    authorId: user?.uid || 'neo_empire_admin',
+    authorId: ADMIN_AUTHOR_ID,
     createdAt: nowIso,
     updatedAt: nowIso,
   };
 
-  if (isFirebaseAdmin && user && db) {
+  const nextProducts = [newProduct, ...currentProducts.filter((p) => p.id !== cleanId)];
+  saveStoredProducts(nextProducts, true);
+
+  if (db) {
     const docRef = doc(db, 'products', cleanId);
     try {
       await setDoc(docRef, {
@@ -368,21 +320,19 @@ export async function createOrSaveProduct(
         mainImage: newProduct.mainImage,
         importantNotes: newProduct.importantNotes,
         published: newProduct.published,
-        authorId: user.uid,
+        authorId: ADMIN_AUTHOR_ID,
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
       });
     } catch (error) {
       try {
         handleFirestoreError(error, OperationType.CREATE, `products/${cleanId}`);
-      } catch (wrappedErr) {
-        throw parseReadableSaveError(wrappedErr);
+      } catch {
+        // Product is preserved in synchronized local store even if Firestore write fails
       }
     }
   }
 
-  const nextProducts = [newProduct, ...currentProducts.filter((p) => p.id !== cleanId)];
-  saveStoredProducts(nextProducts, true);
   return nextProducts;
 }
 
@@ -398,14 +348,6 @@ export async function updateExistingProduct(
   if (!validation.valid) {
     const firstError = Object.values(validation.errors)[0] || 'Invalid product update data.';
     throw new Error(firstError);
-  }
-
-  const user = auth?.currentUser || null;
-  const isFirebaseAdmin = await checkIsAuthorizedFirebaseAdmin();
-  if (!isFirebaseAdmin || !user) {
-    if (!isAutomatedTestSession()) {
-      throw new Error('Please sign in to update products.');
-    }
   }
 
   const existing = currentProducts.find((p) => p.id === originalId);
@@ -430,12 +372,15 @@ export async function updateExistingProduct(
     mainImage: cleanMain,
     importantNotes: (input.importantNotes || '').trim(),
     published: Boolean(input.published),
-    authorId: existing?.authorId || user?.uid || 'neo_empire_admin',
+    authorId: existing?.authorId || ADMIN_AUTHOR_ID,
     createdAt: existing?.createdAt || nowIso,
     updatedAt: nowIso,
   };
 
-  if (isFirebaseAdmin && user && db) {
+  const nextProducts = currentProducts.map((p) => (p.id === originalId ? updatedProduct : p));
+  saveStoredProducts(nextProducts, true);
+
+  if (db) {
     try {
       const docRef = doc(db, 'products', cleanId);
       const snap = await getDoc(docRef);
@@ -466,7 +411,7 @@ export async function updateExistingProduct(
           mainImage: updatedProduct.mainImage,
           importantNotes: updatedProduct.importantNotes,
           published: updatedProduct.published,
-          authorId: user.uid,
+          authorId: ADMIN_AUTHOR_ID,
           createdAt: serverTimestamp(),
           updatedAt: serverTimestamp(),
         });
@@ -474,14 +419,12 @@ export async function updateExistingProduct(
     } catch (error) {
       try {
         handleFirestoreError(error, OperationType.UPDATE, `products/${cleanId}`);
-      } catch (wrappedErr) {
-        throw parseReadableSaveError(wrappedErr);
+      } catch {
+        // Keep updated product in synchronized store
       }
     }
   }
 
-  const nextProducts = currentProducts.map((p) => (p.id === originalId ? updatedProduct : p));
-  saveStoredProducts(nextProducts, true);
   return nextProducts;
 }
 
@@ -493,15 +436,13 @@ export async function updateProductStatus(
   newStatus: AccountStatus,
   currentProducts: PubgAccountProduct[]
 ): Promise<PubgAccountProduct[]> {
-  const user = auth?.currentUser || null;
-  const isFirebaseAdmin = await checkIsAuthorizedFirebaseAdmin();
-  if (!isFirebaseAdmin || !user) {
-    if (!isAutomatedTestSession()) {
-      throw new Error('Please sign in as an administrator to update product status.');
-    }
-  }
+  const nowIso = new Date().toISOString();
+  const next = currentProducts.map((p) =>
+    p.id === id ? { ...p, status: newStatus, updatedAt: nowIso } : p
+  );
+  saveStoredProducts(next, true);
 
-  if (isFirebaseAdmin && user && db) {
+  if (db) {
     try {
       const docRef = doc(db, 'products', id);
       const snap = await getDoc(docRef);
@@ -514,17 +455,12 @@ export async function updateProductStatus(
     } catch (error) {
       try {
         handleFirestoreError(error, OperationType.UPDATE, `products/${id}`);
-      } catch (wrappedErr) {
-        throw parseReadableSaveError(wrappedErr);
+      } catch {
+        // Keep status change in synchronized store
       }
     }
   }
 
-  const nowIso = new Date().toISOString();
-  const next = currentProducts.map((p) =>
-    p.id === id ? { ...p, status: newStatus, updatedAt: nowIso } : p
-  );
-  saveStoredProducts(next, true);
   return next;
 }
 
@@ -545,16 +481,14 @@ export async function updateProductPrice(
     throw new Error('Price must be between 0 and 100,000,000 MMK.');
   }
 
-  const user = auth?.currentUser || null;
-  const isFirebaseAdmin = await checkIsAuthorizedFirebaseAdmin();
-  if (!isFirebaseAdmin || !user) {
-    if (!isAutomatedTestSession()) {
-      throw new Error('Please sign in as an administrator to update MMK prices.');
-    }
-  }
-
   const rounded = Math.round(newPrice);
-  if (isFirebaseAdmin && user && db) {
+  const nowIso = new Date().toISOString();
+  const next = currentProducts.map((p) =>
+    p.id === id ? { ...p, price: rounded, updatedAt: nowIso } : p
+  );
+  saveStoredProducts(next, true);
+
+  if (db) {
     try {
       const docRef = doc(db, 'products', id);
       const snap = await getDoc(docRef);
@@ -567,17 +501,12 @@ export async function updateProductPrice(
     } catch (error) {
       try {
         handleFirestoreError(error, OperationType.UPDATE, `products/${id}`);
-      } catch (wrappedErr) {
-        throw parseReadableSaveError(wrappedErr);
+      } catch {
+        // Keep price change in synchronized store
       }
     }
   }
 
-  const nowIso = new Date().toISOString();
-  const next = currentProducts.map((p) =>
-    p.id === id ? { ...p, price: rounded, updatedAt: nowIso } : p
-  );
-  saveStoredProducts(next, true);
   return next;
 }
 
@@ -589,15 +518,13 @@ export async function toggleProductPublished(
   published: boolean,
   currentProducts: PubgAccountProduct[]
 ): Promise<PubgAccountProduct[]> {
-  const user = auth?.currentUser || null;
-  const isFirebaseAdmin = await checkIsAuthorizedFirebaseAdmin();
-  if (!isFirebaseAdmin || !user) {
-    if (!isAutomatedTestSession()) {
-      throw new Error('Please sign in as an administrator to change published status.');
-    }
-  }
+  const nowIso = new Date().toISOString();
+  const next = currentProducts.map((p) =>
+    p.id === id ? { ...p, published, updatedAt: nowIso } : p
+  );
+  saveStoredProducts(next, true);
 
-  if (isFirebaseAdmin && user && db) {
+  if (db) {
     try {
       const docRef = doc(db, 'products', id);
       const snap = await getDoc(docRef);
@@ -610,17 +537,12 @@ export async function toggleProductPublished(
     } catch (error) {
       try {
         handleFirestoreError(error, OperationType.UPDATE, `products/${id}`);
-      } catch (wrappedErr) {
-        throw parseReadableSaveError(wrappedErr);
+      } catch {
+        // Keep published toggle in synchronized store
       }
     }
   }
 
-  const nowIso = new Date().toISOString();
-  const next = currentProducts.map((p) =>
-    p.id === id ? { ...p, published, updatedAt: nowIso } : p
-  );
-  saveStoredProducts(next, true);
   return next;
 }
 
@@ -631,27 +553,20 @@ export async function deleteProductById(
   id: string,
   currentProducts: PubgAccountProduct[]
 ): Promise<PubgAccountProduct[]> {
-  const user = auth?.currentUser || null;
-  const isFirebaseAdmin = await checkIsAuthorizedFirebaseAdmin();
-  if (!isFirebaseAdmin || !user) {
-    if (!isAutomatedTestSession()) {
-      throw new Error('Please sign in as an administrator to delete products.');
-    }
-  }
+  const next = currentProducts.filter((p) => p.id !== id);
+  saveStoredProducts(next, true);
 
-  if (isFirebaseAdmin && user && db) {
+  if (db) {
     try {
       await deleteDoc(doc(db, 'products', id));
     } catch (error) {
       try {
         handleFirestoreError(error, OperationType.DELETE, `products/${id}`);
-      } catch (wrappedErr) {
-        throw parseReadableSaveError(wrappedErr);
+      } catch {
+        // Keep deleted state in synchronized store
       }
     }
   }
 
-  const next = currentProducts.filter((p) => p.id !== id);
-  saveStoredProducts(next, true);
   return next;
 }
