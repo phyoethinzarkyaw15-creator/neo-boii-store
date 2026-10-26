@@ -49,9 +49,6 @@ interface AdminPanelProps {
   products: PubgAccountProduct[];
   firebaseUser: User | null;
   initialAuthError?: string | null;
-  isAuthorizedSession: boolean;
-  onEnableAdminSession: () => void;
-  onDisableAdminSession: () => void;
   onCreateProduct: (input: ProductFormInput) => Promise<void>;
   onUpdateProduct: (originalId: string, input: ProductFormInput) => Promise<void>;
   onDeleteProduct: (productId: string) => Promise<void>;
@@ -83,8 +80,6 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   products,
   firebaseUser,
   initialAuthError = null,
-  isAuthorizedSession,
-  onDisableAdminSession,
   onCreateProduct,
   onUpdateProduct,
   onDeleteProduct,
@@ -120,7 +115,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   const additionalImagesInputRef = useRef<HTMLInputElement | null>(null);
   const replaceFileInputRef = useRef<HTMLInputElement | null>(null);
 
-  const hasAdminAccess = Boolean(firebaseUser) || isAuthorizedSession;
+  const isAuthenticated = firebaseUser !== null;
   const displayedAuthError = authError || initialAuthError;
 
   const metrics: AdminDashboardMetrics = computeDashboardMetrics(products);
@@ -355,44 +350,6 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
       });
     }
   };
-
-  // Admin Login Screen
-  if (!hasAdminAccess) {
-    return (
-      <section
-        data-testid="admin-login-screen"
-        className="max-w-md mx-auto px-4 py-12 sm:py-20"
-      >
-        <div className="rounded-xl p-6 sm:p-8 neo-surface-card space-y-6 text-center">
-          <div className="space-y-1.5">
-            <div className="text-xs font-mono uppercase tracking-[0.22em] text-[#C5A059]">
-              NEO EMPIRE
-            </div>
-            <h1 className="font-display text-2xl sm:text-3xl font-bold text-[#F4F2ED]">
-              Admin Panel
-            </h1>
-          </div>
-
-          {displayedAuthError && (
-            <div className="p-3.5 rounded-lg bg-amber-950/40 border border-amber-500/40 text-xs text-amber-200 flex items-start gap-2.5 text-left">
-              <AlertCircle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
-              <span className="break-words">{displayedAuthError}</span>
-            </div>
-          )}
-
-          <button
-            type="button"
-            disabled={isSigningIn}
-            onClick={handleGoogleLogin}
-            className="w-full min-h-[48px] py-3.5 px-5 rounded-lg gold-metallic-button text-xs sm:text-sm font-bold tracking-wider flex items-center justify-center gap-2 cursor-pointer"
-          >
-            <LogIn className="w-4 h-4 shrink-0" />
-            <span>Continue with Google</span>
-          </button>
-        </div>
-      </section>
-    );
-  }
 
   const previewProduct: PubgAccountProduct = {
     ...formState,
@@ -667,47 +624,121 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   );
 
   return (
-    <section className="max-w-[1240px] mx-auto px-3.5 sm:px-8 py-6 sm:py-10 space-y-6 sm:space-y-8">
-      {/* Top Action Header (No duplicated logo image) */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-5 border-b border-white/[0.08]">
-        <div className="min-w-0">
-          <div className="text-[11px] sm:text-xs font-mono uppercase tracking-[0.18em] text-[#C5A059] truncate">
-            NEO EMPIRE · PRODUCT MANAGEMENT
+    <>
+      {/* 1. Admin Login Screen (Visible when user === null, Hidden when user !== null) */}
+      <section
+        id="admin-login-screen"
+        data-testid="admin-login-screen"
+        hidden={isAuthenticated}
+        style={{ display: isAuthenticated ? 'none' : 'block' }}
+        className="max-w-md mx-auto px-4 py-12 sm:py-20"
+      >
+        <div
+          className="rounded-xl p-6 sm:p-8 neo-surface-card space-y-6 text-center"
+          style={{
+            background: 'linear-gradient(180deg, #101116 0%, #0A0B0E 100%)',
+            border: '1px solid rgba(255, 255, 255, 0.1)',
+            borderRadius: '12px',
+            padding: '28px 24px',
+            textAlign: 'center',
+          }}
+        >
+          <div className="space-y-1.5">
+            <div
+              className="text-xs font-mono uppercase tracking-[0.22em] text-[#C5A059]"
+              style={{ color: '#C5A059', letterSpacing: '0.22em', fontSize: '12px' }}
+            >
+              NEO EMPIRE
+            </div>
+            <h1
+              className="font-display text-2xl sm:text-3xl font-bold text-[#F4F2ED]"
+              style={{ color: '#F4F2ED', fontWeight: 700, margin: '6px 0 0 0' }}
+            >
+              Admin Panel
+            </h1>
           </div>
-          <h1 className="font-display text-xl sm:text-3xl font-bold text-[#F4F2ED] mt-0.5 truncate">
-            {activeTab === 'dashboard' && 'Admin Dashboard'}
-            {activeTab === 'products' && 'Product Management'}
-            {activeTab === 'add-product' && 'Add Account'}
-            {activeTab === 'edit-product' &&
-              (editingOriginalId ? `Edit Account (${editingOriginalId})` : 'Edit Account')}
-            {activeTab === 'image-upload' && 'Image Upload'}
-            {activeTab === 'settings' && 'Store Settings'}
-          </h1>
-        </div>
 
-        <div className="flex flex-wrap items-center gap-2.5">
-          <button
-            type="button"
-            onClick={startAddAccount}
-            className="gold-metallic-button min-h-[46px] px-4 py-2.5 rounded-lg text-xs font-bold uppercase tracking-wider flex items-center justify-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0 flex-1 sm:flex-initial"
-          >
-            <Plus className="w-4 h-4 shrink-0" />
-            <span>Add Account</span>
-          </button>
+          {displayedAuthError && (
+            <div
+              role="alert"
+              className="p-3.5 rounded-lg bg-amber-950/40 border border-amber-500/40 text-xs text-amber-200 flex items-start gap-2.5 text-left"
+            >
+              <AlertCircle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+              <span className="break-words">{displayedAuthError}</span>
+            </div>
+          )}
 
           <button
             type="button"
-            onClick={async () => {
-              if (firebaseUser) await signOutAdmin();
-              onDisableAdminSession();
+            disabled={isSigningIn}
+            onClick={handleGoogleLogin}
+            className="w-full min-h-[48px] py-3.5 px-5 rounded-lg gold-metallic-button text-xs sm:text-sm font-bold tracking-wider flex items-center justify-center gap-2 cursor-pointer"
+            style={{
+              width: '100%',
+              minHeight: '48px',
+              padding: '14px 20px',
+              borderRadius: '8px',
+              background: 'linear-gradient(180deg, #DEC07A 0%, #C5A059 55%, #A37E3B 100%)',
+              color: '#08080A',
+              fontWeight: 700,
+              cursor: isSigningIn ? 'wait' : 'pointer',
             }}
-            className="neo-dark-button min-h-[46px] px-3.5 py-2.5 rounded-lg text-xs font-medium flex items-center justify-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0"
           >
-            <LogOut className="w-3.5 h-3.5 shrink-0" />
-            <span>Sign Out</span>
+            <LogIn className="w-4 h-4 shrink-0" />
+            <span>{isSigningIn ? 'Signing in…' : 'Continue with Google'}</span>
           </button>
         </div>
-      </div>
+      </section>
+
+      {/* 2. Admin Dashboard (Hidden when user === null, Visible only when user !== null) */}
+      <section
+        id="admin-dashboard"
+        data-testid="admin-dashboard"
+        hidden={!isAuthenticated}
+        style={{ display: isAuthenticated ? 'block' : 'none' }}
+        className="max-w-[1240px] mx-auto px-3.5 sm:px-8 py-6 sm:py-10 space-y-6 sm:space-y-8"
+      >
+        {isAuthenticated && (
+          <>
+            {/* Top Action Header (No duplicated logo image) */}
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-5 border-b border-white/[0.08]">
+              <div className="min-w-0">
+                <div className="text-[11px] sm:text-xs font-mono uppercase tracking-[0.18em] text-[#C5A059] truncate">
+                  NEO EMPIRE · PRODUCT MANAGEMENT
+                </div>
+                <h1 className="font-display text-xl sm:text-3xl font-bold text-[#F4F2ED] mt-0.5 truncate">
+                  {activeTab === 'dashboard' && 'Admin Dashboard'}
+                  {activeTab === 'products' && 'Product Management'}
+                  {activeTab === 'add-product' && 'Add Account'}
+                  {activeTab === 'edit-product' &&
+                    (editingOriginalId ? `Edit Account (${editingOriginalId})` : 'Edit Account')}
+                  {activeTab === 'image-upload' && 'Image Upload'}
+                  {activeTab === 'settings' && 'Store Settings'}
+                </h1>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2.5">
+                <button
+                  type="button"
+                  onClick={startAddAccount}
+                  className="gold-metallic-button min-h-[46px] px-4 py-2.5 rounded-lg text-xs font-bold uppercase tracking-wider flex items-center justify-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0 flex-1 sm:flex-initial"
+                >
+                  <Plus className="w-4 h-4 shrink-0" />
+                  <span>Add Account</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={async () => {
+                    await signOutAdmin();
+                  }}
+                  className="neo-dark-button min-h-[46px] px-3.5 py-2.5 rounded-lg text-xs font-medium flex items-center justify-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0"
+                >
+                  <LogOut className="w-3.5 h-3.5 shrink-0" />
+                  <span>Sign Out</span>
+                </button>
+              </div>
+            </div>
 
       {/* Status Notification Banner */}
       {actionBanner && (
@@ -1202,6 +1233,9 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
           </div>
         </div>
       )}
-    </section>
+          </>
+        )}
+      </section>
+    </>
   );
 };

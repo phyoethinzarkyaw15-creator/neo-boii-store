@@ -25,16 +25,9 @@ import { AdminPanel, AdminTab } from './components/AdminPanel';
 import { AccountDetailModal } from './components/AccountDetailModal';
 
 export default function AdminApp() {
-  const [products, setProducts] = useState<PubgAccountProduct[]>(() => loadStoredProducts());
+  const [products, setProducts] = useState<PubgAccountProduct[]>([]);
   const [firebaseUser, setFirebaseUser] = useState<User | null>(null);
   const [redirectAuthError, setRedirectAuthError] = useState<string | null>(null);
-  const [isAuthorizedSession, setIsAuthorizedSession] = useState<boolean>(() => {
-    if (typeof window !== 'undefined') {
-      const params = new URLSearchParams(window.location.search);
-      return params.get('autostart') === '1';
-    }
-    return false;
-  });
   const [activeTab, setActiveTab] = useState<AdminTab>('dashboard');
   const [selectedProduct, setSelectedProduct] = useState<PubgAccountProduct | null>(null);
 
@@ -65,6 +58,11 @@ export default function AdminApp() {
   }, []);
 
   useEffect(() => {
+    if (!firebaseUser) {
+      setProducts([]);
+      return;
+    }
+    setProducts(loadStoredProducts());
     const unsubProducts = subscribeToProducts(true, (updatedProducts) => {
       setProducts(updatedProducts);
     });
@@ -101,7 +99,7 @@ export default function AdminApp() {
     setProducts(next);
   };
 
-  const hasAdminAccess = Boolean(firebaseUser) || isAuthorizedSession;
+  const isAuthenticated = firebaseUser !== null;
 
   const navItems: Array<{ id: AdminTab; label: string }> = [
     { id: 'dashboard', label: 'Dashboard' },
@@ -142,12 +140,10 @@ export default function AdminApp() {
                 NEO EMPIRE
               </div>
               <div className="flex items-center gap-1.5 text-[11px] font-mono text-zinc-400 truncate">
-                {hasAdminAccess ? (
+                {isAuthenticated ? (
                   <>
                     <ShieldCheck className="w-3 h-3 text-emerald-400 shrink-0" />
-                    <span className="truncate text-emerald-400">
-                      {firebaseUser?.email || 'Admin Panel'}
-                    </span>
+                    <span className="truncate text-emerald-400">Admin Panel</span>
                   </>
                 ) : (
                   <span className="truncate text-[#C5A059]">Admin Panel</span>
@@ -156,7 +152,7 @@ export default function AdminApp() {
             </div>
           </div>
 
-          {hasAdminAccess && (
+          {isAuthenticated && (
             <nav
               aria-label="Admin Navigation"
               className="hidden md:flex items-center gap-5 text-xs font-medium"
@@ -190,7 +186,7 @@ export default function AdminApp() {
         </div>
 
         {/* Mobile Admin Navigation Bar (No duplicate logo, fits 360px without clipping) */}
-        {hasAdminAccess && (
+        {isAuthenticated && (
           <div className="md:hidden border-t border-white/[0.08] bg-[#0B0C10] px-2 py-2 grid grid-cols-4 gap-1">
             {navItems.map((item) => (
               <button
@@ -217,13 +213,6 @@ export default function AdminApp() {
           products={products}
           firebaseUser={firebaseUser}
           initialAuthError={redirectAuthError}
-          isAuthorizedSession={hasAdminAccess}
-          onEnableAdminSession={() => {
-            setIsAuthorizedSession(true);
-          }}
-          onDisableAdminSession={() => {
-            setIsAuthorizedSession(false);
-          }}
           onCreateProduct={handleCreateProduct}
           onUpdateProduct={handleUpdateProduct}
           onDeleteProduct={handleDeleteProduct}

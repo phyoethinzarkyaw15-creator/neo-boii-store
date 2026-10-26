@@ -171,7 +171,7 @@ test('formatAuthErrorMessage maps Firebase error codes to clean user-facing mess
   ]) {
     assert.equal(
       formatAuthErrorMessage({ code }),
-      'Google sign-in could not be completed. Please try again.'
+      'Unable to sign in. Please try again.'
     );
   }
 });

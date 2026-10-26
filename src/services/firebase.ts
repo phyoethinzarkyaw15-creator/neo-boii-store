@@ -1,4 +1,4 @@
-import { initializeApp, FirebaseApp } from 'firebase/app';
+import { initializeApp, getApps, getApp, FirebaseApp } from 'firebase/app';
 import {
   getAuth,
   GoogleAuthProvider,
@@ -33,7 +33,7 @@ let persistenceReadyPromise: Promise<void> = Promise.resolve();
 let redirectResultPromise: Promise<{ user: User | null; error: string | null }> | null = null;
 
 try {
-  appInstance = initializeApp(firebaseConfig);
+  appInstance = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
   dbInstance = getFirestore(appInstance, firebaseConfig.firestoreDatabaseId);
   authInstance = getAuth(appInstance);
   if (firebaseConfig.storageBucket) {
@@ -188,22 +188,7 @@ export function formatAuthErrorMessage(error: unknown): string {
     return 'Google sign-in is not enabled for this website domain.';
   }
 
-  if (
-    code.includes('auth/popup-closed-by-user') ||
-    rawMessage.includes('auth/popup-closed-by-user') ||
-    code.includes('auth/cancelled-popup-request') ||
-    rawMessage.includes('auth/cancelled-popup-request') ||
-    code.includes('auth/redirect-cancelled-by-user') ||
-    rawMessage.includes('auth/redirect-cancelled-by-user') ||
-    code.includes('auth/operation-not-allowed') ||
-    rawMessage.includes('auth/operation-not-allowed') ||
-    code.includes('auth/network-request-failed') ||
-    rawMessage.includes('auth/network-request-failed')
-  ) {
-    return 'Google sign-in could not be completed. Please try again.';
-  }
-
-  return 'Google sign-in could not be completed. Please try again.';
+  return 'Unable to sign in. Please try again.';
 }
 
 export function completeRedirectSignIn(): Promise<{ user: User | null; error: string | null }> {
@@ -228,7 +213,7 @@ export function completeRedirectSignIn(): Promise<{ user: User | null; error: st
 
 export async function signInAdminWithGoogle(): Promise<User | null> {
   if (!authInstance || !googleProviderInstance) {
-    throw new Error('Google sign-in could not be completed. Please try again.');
+    throw new Error('Unable to sign in. Please try again.');
   }
   if (authInstance.currentUser) {
     return authInstance.currentUser;
