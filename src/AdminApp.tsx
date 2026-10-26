@@ -35,24 +35,67 @@ declare global {
         hasUser: boolean;
       };
       handleAuthenticatedUser: (user: User) => void;
+      showAdminDashboard: (user: User) => void;
+      hideLoginScreen: () => void;
       showLoginScreen: () => void;
+      hideAdminDashboard: () => void;
       showLoginError: (error: unknown) => void;
       simulateFirestoreLoadError: () => void;
     };
   }
 }
 
-function syncAdminDomVisibility(authenticated: boolean): void {
+function hideAuthLoadingElement(): void {
+  if (typeof document === 'undefined') return;
+  const authLoading = document.getElementById('admin-auth-loading');
+  if (authLoading) {
+    authLoading.style.display = 'none';
+    authLoading.hidden = true;
+  }
+}
+
+function showAuthLoadingElement(): void {
+  if (typeof document === 'undefined') return;
+  const authLoading = document.getElementById('admin-auth-loading');
+  if (authLoading) {
+    authLoading.style.display = 'block';
+    authLoading.hidden = false;
+  }
+}
+
+function hideLoginScreenDom(): void {
   if (typeof document === 'undefined') return;
   const loginScreen = document.getElementById('admin-login-screen');
-  const adminDashboard = document.getElementById('admin-dashboard');
   if (loginScreen) {
-    loginScreen.style.display = authenticated ? 'none' : 'block';
-    loginScreen.hidden = authenticated;
+    loginScreen.style.display = 'none';
+    loginScreen.hidden = true;
   }
+}
+
+function showLoginScreenDom(): void {
+  if (typeof document === 'undefined') return;
+  const loginScreen = document.getElementById('admin-login-screen');
+  if (loginScreen) {
+    loginScreen.style.display = 'block';
+    loginScreen.hidden = false;
+  }
+}
+
+function hideAdminDashboardDom(): void {
+  if (typeof document === 'undefined') return;
+  const adminDashboard = document.getElementById('admin-dashboard');
   if (adminDashboard) {
-    adminDashboard.style.display = authenticated ? 'block' : 'none';
-    adminDashboard.hidden = !authenticated;
+    adminDashboard.style.display = 'none';
+    adminDashboard.hidden = true;
+  }
+}
+
+function showAdminDashboardDom(): void {
+  if (typeof document === 'undefined') return;
+  const adminDashboard = document.getElementById('admin-dashboard');
+  if (adminDashboard) {
+    adminDashboard.style.display = 'block';
+    adminDashboard.hidden = false;
   }
 }
 
@@ -61,7 +104,7 @@ export default function AdminApp() {
   const [currentUser, setCurrentUser] = useState<User | null>(() => auth?.currentUser ?? null);
   const [authInitialized, setAuthInitialized] = useState<boolean>(() => Boolean(auth?.currentUser));
   const [adminState, setAdminState] = useState<AdminUiState>(() =>
-    auth?.currentUser ? 'AUTHENTICATED' : 'LOGIN'
+    auth?.currentUser ? 'AUTHENTICATED' : 'CHECKING_AUTH'
   );
   const [redirectAuthError, setRedirectAuthError] = useState<string | null>(null);
   const [productLoadError, setProductLoadError] = useState<string | null>(null);
@@ -102,7 +145,16 @@ export default function AdminApp() {
     );
   }, []);
 
-  const handleAuthenticatedUser = useCallback(
+  const hideLoginScreen = useCallback(() => {
+    hideAuthLoadingElement();
+    hideLoginScreenDom();
+  }, []);
+
+  const hideAdminDashboard = useCallback(() => {
+    hideAdminDashboardDom();
+  }, []);
+
+  const showAdminDashboard = useCallback(
     (user: User) => {
       if (!user) return;
       currentUserRef.current = user;
@@ -110,7 +162,9 @@ export default function AdminApp() {
       setCurrentUser(user);
       setAuthInitialized(true);
       setRedirectAuthError(null);
-      syncAdminDomVisibility(true);
+      hideAuthLoadingElement();
+      hideLoginScreenDom();
+      showAdminDashboardDom();
 
       if (dashboardInitializedRef.current) {
         return;
@@ -122,9 +176,18 @@ export default function AdminApp() {
     [initializeAdminDashboard]
   );
 
+  const handleAuthenticatedUser = useCallback(
+    (user: User) => {
+      showAdminDashboard(user);
+      hideLoginScreen();
+    },
+    [hideLoginScreen, showAdminDashboard]
+  );
+
   const showLoginScreen = useCallback(() => {
     if (auth?.currentUser) {
-      handleAuthenticatedUser(auth.currentUser);
+      showAdminDashboard(auth.currentUser);
+      hideLoginScreen();
       return;
     }
     currentUserRef.current = null;
@@ -138,8 +201,10 @@ export default function AdminApp() {
     setProducts([]);
     setProductLoadError(null);
     setAdminState(redirectAuthErrorRef.current ? 'ERROR' : 'LOGIN');
-    syncAdminDomVisibility(false);
-  }, [handleAuthenticatedUser]);
+    hideAuthLoadingElement();
+    hideAdminDashboardDom();
+    showLoginScreenDom();
+  }, [hideLoginScreen, showAdminDashboard]);
 
   const showLoginError = useCallback((error: unknown) => {
     if (auth?.currentUser || currentUserRef.current) {
@@ -150,22 +215,30 @@ export default function AdminApp() {
     setRedirectAuthError(message);
     setAuthInitialized(true);
     setAdminState('ERROR');
-    syncAdminDomVisibility(false);
+    hideAuthLoadingElement();
+    hideAdminDashboardDom();
+    showLoginScreenDom();
   }, []);
 
   useEffect(() => {
     let isMounted = true;
 
     if (auth?.currentUser) {
-      handleAuthenticatedUser(auth.currentUser);
+      showAdminDashboard(auth.currentUser);
+      hideLoginScreen();
+    } else {
+      showAuthLoadingElement();
     }
 
-    // Step 2 — Handle redirect result safely
+    // Step 5 — Safely process getRedirectResult(auth).
+    // If it returns a user: keep that user -> show Admin Dashboard.
+    // If it returns null: wait for onAuthStateChanged() (do NOT treat null as logout).
     completeRedirectSignIn()
       .then(({ user, error }) => {
         if (!isMounted) return;
         if (user) {
-          handleAuthenticatedUser(user);
+          showAdminDashboard(user);
+          hideLoginScreen();
         } else if (error) {
           showLoginError(error);
         }
@@ -175,13 +248,15 @@ export default function AdminApp() {
         showLoginError(error);
       });
 
-    // Step 3 — Listen to auth state changes (final authority)
+    // Step 6 — Register onAuthStateChanged(auth, user) as the source of truth
     const unsubAuth = subscribeToAuthState((user) => {
       if (!isMounted) return;
       if (user) {
-        handleAuthenticatedUser(user);
+        showAdminDashboard(user);
+        hideLoginScreen();
       } else {
         showLoginScreen();
+        hideAdminDashboard();
       }
     });
 
@@ -194,7 +269,13 @@ export default function AdminApp() {
         productsUnsubRef.current = null;
       }
     };
-  }, [handleAuthenticatedUser, showLoginError, showLoginScreen]);
+  }, [
+    hideAdminDashboard,
+    hideLoginScreen,
+    showAdminDashboard,
+    showLoginError,
+    showLoginScreen,
+  ]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -205,7 +286,10 @@ export default function AdminApp() {
         hasUser: currentUser !== null,
       }),
       handleAuthenticatedUser,
+      showAdminDashboard,
+      hideLoginScreen,
       showLoginScreen,
+      hideAdminDashboard,
       showLoginError,
       simulateFirestoreLoadError: () => {
         setProductLoadError('Signed in, but product data could not be loaded.');
@@ -220,6 +304,9 @@ export default function AdminApp() {
     authInitialized,
     currentUser,
     handleAuthenticatedUser,
+    hideAdminDashboard,
+    hideLoginScreen,
+    showAdminDashboard,
     showLoginError,
     showLoginScreen,
   ]);
@@ -369,10 +456,14 @@ export default function AdminApp() {
           onSelectTab={setActiveTab}
           products={products}
           firebaseUser={currentUser}
+          authInitialized={authInitialized}
           adminState={adminState}
           onAdminStateChange={setAdminState}
           onUserAuthenticated={handleAuthenticatedUser}
-          onUserSignedOut={showLoginScreen}
+          onUserSignedOut={() => {
+            showLoginScreen();
+            hideAdminDashboard();
+          }}
           initialAuthError={redirectAuthError}
           productLoadError={productLoadError}
           onCreateProduct={handleCreateProduct}

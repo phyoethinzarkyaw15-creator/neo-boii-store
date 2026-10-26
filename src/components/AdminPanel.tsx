@@ -44,6 +44,7 @@ export type AdminTab =
   | 'settings';
 
 export type AdminUiState =
+  | 'CHECKING_AUTH'
   | 'LOGIN'
   | 'AUTHENTICATING'
   | 'AUTHENTICATED'
@@ -56,6 +57,7 @@ interface AdminPanelProps {
   onSelectTab: (tab: AdminTab) => void;
   products: PubgAccountProduct[];
   firebaseUser: User | null;
+  authInitialized?: boolean;
   adminState?: AdminUiState;
   onAdminStateChange?: (state: AdminUiState) => void;
   onUserAuthenticated?: (user: User) => void;
@@ -92,6 +94,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   onSelectTab,
   products,
   firebaseUser,
+  authInitialized = true,
   adminState = 'LOGIN',
   onAdminStateChange,
   onUserAuthenticated,
@@ -134,6 +137,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   const replaceFileInputRef = useRef<HTMLInputElement | null>(null);
 
   const isAuthenticated = firebaseUser !== null;
+  const isCheckingAuth = !isAuthenticated && (!authInitialized || adminState === 'CHECKING_AUTH');
+  const shouldShowLoginScreen = !isAuthenticated && !isCheckingAuth;
   const isAuthenticatingState = isSigningIn || adminState === 'AUTHENTICATING';
   const displayedAuthError = authError || initialAuthError;
 
@@ -653,15 +658,50 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
 
   return (
     <>
-      {/* 1. Admin Login Screen (Visible when user === null, Hidden when user !== null) */}
+      {/* 0. Initial Authentication Loading State (Prevents flashing Login Screen after Google redirect) */}
+      <section
+        id="admin-auth-loading"
+        data-testid="admin-auth-loading"
+        hidden={!isCheckingAuth}
+        style={{ display: isCheckingAuth ? 'block' : 'none' }}
+        className="max-w-md mx-auto px-4 py-12 sm:py-20"
+      >
+        {isCheckingAuth && (
+          <div
+            className="rounded-xl p-6 sm:p-8 neo-surface-card space-y-3 text-center"
+            style={{
+              background: 'linear-gradient(180deg, #101116 0%, #0A0B0E 100%)',
+              border: '1px solid rgba(255, 255, 255, 0.1)',
+              borderRadius: '12px',
+              padding: '28px 24px',
+              textAlign: 'center',
+            }}
+          >
+            <div
+              className="text-xs font-mono uppercase tracking-[0.22em] text-[#C5A059]"
+              style={{ color: '#C5A059', letterSpacing: '0.22em', fontSize: '12px' }}
+            >
+              NEO EMPIRE
+            </div>
+            <div
+              className="font-display text-lg font-semibold text-[#F4F2ED]"
+              style={{ color: '#F4F2ED', fontWeight: 600, fontSize: '18px' }}
+            >
+              Checking authentication…
+            </div>
+          </div>
+        )}
+      </section>
+
+      {/* 1. Admin Login Screen (Visible only when auth check completes and user === null) */}
       <section
         id="admin-login-screen"
         data-testid="admin-login-screen"
-        hidden={isAuthenticated}
-        style={{ display: isAuthenticated ? 'none' : 'block' }}
+        hidden={!shouldShowLoginScreen}
+        style={{ display: shouldShowLoginScreen ? 'block' : 'none' }}
         className="max-w-md mx-auto px-4 py-12 sm:py-20"
       >
-        {!isAuthenticated && (
+        {shouldShowLoginScreen && (
           <div
             className="rounded-xl p-6 sm:p-8 neo-surface-card space-y-6 text-center"
             style={{
